@@ -1,0 +1,33 @@
+[package]
+name = "flex-vec"
+version = "0.0.1"
+authors = ["Andrew Whitehead <cywolf@gmail.com>"]
+edition = "2021"
+description = "Flexible vectors"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/andrewwhitehead/flex-vec/"
+categories = ["data-structures", "memory-management", "no-std"]
+keywords = ["vec", "zeroize"]
+
+[features]
+default = ["alloc", "zeroize"]
+alloc = []
+std = ["alloc"]
+# zeroize
+
+[dependencies]
+zeroize = { version = "1", default-features = false, optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = [
+    "cargo_bench_support",
+    "html_reports",
+] }
+rand = "0.8"
+
+
+[[bench]]
+name = "compare_vec"
+harness = false
+required-features = ["alloc"]
