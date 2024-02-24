@@ -9,8 +9,8 @@ use crate::error::{InsertionError, StorageError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
 
-use self::buffer::{VecBuffer, VecBufferSpawn};
-use self::config::{VecAllocIn, VecConfig, VecConfigAllocator, VecConfigNew};
+use self::buffer::VecBuffer;
+use self::config::{VecConfig, VecConfigAllocator, VecConfigNew, VecConfigSpawn, VecNewIn};
 use self::insert::Inserter;
 
 pub use self::{drain::Drain, into_iter::IntoIter, splice::Splice};
@@ -56,7 +56,7 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
     }
 
     pub fn try_with_capacity(capacity: C::Index) -> Result<Self, StorageError> {
-        let buffer = C::vec_try_alloc(capacity, false)?;
+        let buffer = C::vec_try_new(capacity, false)?;
         Ok(Self { buffer })
     }
 
@@ -101,9 +101,9 @@ impl<T, C: VecConfigAllocator<T>> Vec<T, C> {
 impl<T, C: VecConfig> Vec<T, C> {
     pub fn new_in<A>(alloc_in: A) -> Self
     where
-        A: VecAllocIn<T, Config = C>,
+        A: VecNewIn<T, Config = C>,
     {
-        match A::vec_try_alloc_in(alloc_in, C::Index::ZERO, false) {
+        match A::vec_try_new_in(alloc_in, C::Index::ZERO, false) {
             Ok(buffer) => Self { buffer },
             Err(err) => err.panic(),
         }
@@ -111,16 +111,16 @@ impl<T, C: VecConfig> Vec<T, C> {
 
     pub fn try_new_in<A>(alloc_in: A) -> Result<Self, StorageError>
     where
-        A: VecAllocIn<T, Config = C>,
+        A: VecNewIn<T, Config = C>,
     {
         Ok(Self {
-            buffer: A::vec_try_alloc_in(alloc_in, C::Index::ZERO, false)?,
+            buffer: A::vec_try_new_in(alloc_in, C::Index::ZERO, false)?,
         })
     }
 
     pub fn with_capacity_in<A>(capacity: C::Index, alloc_in: A) -> Self
     where
-        A: VecAllocIn<T, Config = C>,
+        A: VecNewIn<T, Config = C>,
     {
         match Self::try_with_capacity_in(capacity, alloc_in) {
             Ok(res) => res,
@@ -130,10 +130,10 @@ impl<T, C: VecConfig> Vec<T, C> {
 
     pub fn try_with_capacity_in<A>(capacity: C::Index, alloc_in: A) -> Result<Self, StorageError>
     where
-        A: VecAllocIn<T, Config = C>,
+        A: VecNewIn<T, Config = C>,
     {
         Ok(Self {
-            buffer: A::vec_try_alloc_in(alloc_in, capacity, false)?,
+            buffer: A::vec_try_new_in(alloc_in, capacity, false)?,
         })
     }
 }
@@ -217,7 +217,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         if !exact {
             capacity = C::Grow::next_capacity::<T, _>(self.buffer.capacity(), capacity);
         }
-        self.buffer.vec_resize(capacity, false)?;
+        self.buffer.vec_try_resize(capacity, false)?;
         Ok(())
     }
 
@@ -620,7 +620,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     pub fn try_shrink_to(&mut self, min_capacity: C::Index) -> Result<(), StorageError> {
         let len = self.buffer.length().max(min_capacity);
         if self.buffer.capacity() != len {
-            self.buffer.vec_resize(len, true)?;
+            self.buffer.vec_try_resize(len, true)?;
         }
         Ok(())
     }
@@ -648,8 +648,7 @@ impl<T, C: VecConfig> Vec<T, C> {
 
     pub fn split_off(&mut self, index: C::Index) -> Self
     where
-        // FIXME move to new trait:
-        C::Buffer<T>: VecBufferSpawn,
+        C: VecConfigSpawn<T>,
     {
         // FIXME: add marker trait for buffers that support spawn
         let len = self.buffer.length().to_usize();
@@ -658,7 +657,7 @@ impl<T, C: VecConfig> Vec<T, C> {
             index_panic();
         }
         let move_len = C::Index::from_usize(len - index_usize);
-        match self.buffer.vec_spawn(move_len, false) {
+        match C::vec_try_spawn(&self.buffer, move_len, false) {
             Ok(mut buffer) => {
                 if index_usize == 0 {
                     mem::swap(&mut buffer, &mut self.buffer);
@@ -770,15 +769,10 @@ impl<T, C: VecConfig> BorrowMut<[T]> for Vec<T, C> {
     }
 }
 
-impl<T, C: VecConfig> Clone for Vec<T, C>
-where
-    T: Clone,
-    // FIXME: move to new trait:
-    C::Buffer<T>: VecBufferSpawn,
-{
+impl<T: Clone, C: VecConfigSpawn<T>> Clone for Vec<T, C> {
     fn clone(&self) -> Self {
         let mut inst = Self {
-            buffer: match self.buffer.vec_spawn(self.buffer.length(), false) {
+            buffer: match C::vec_try_spawn(&self.buffer, self.buffer.length(), false) {
                 Ok(buf) => buf,
                 Err(err) => err.panic(),
             },

@@ -84,7 +84,7 @@ pub trait VecBuffer: RawBuffer<RawData = Self::Data> {
     }
 
     #[inline]
-    fn vec_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
+    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
         let _ = (capacity, exact);
         Err(StorageError::Unsupported)
     }
@@ -121,16 +121,41 @@ where
     }
 
     #[inline]
-    fn vec_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
+    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
         let length = self.length();
         self.resize_handle(VecHeader { capacity, length }, exact)?;
         Ok(())
     }
 }
 
+pub trait VecBufferNew: VecBuffer {
+    const NEW: Self;
+
+    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
+}
+
+impl<B> VecBufferNew for B
+where
+    B: VecBuffer + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
+{
+    const NEW: Self = Self::NEW;
+
+    #[inline]
+    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
+        Self::alloc_handle_in(
+            Self::NEW_ALLOC,
+            VecHeader {
+                capacity,
+                length: Self::Index::ZERO,
+            },
+            exact,
+        )
+    }
+}
+
 pub trait VecBufferSpawn: VecBuffer {
     #[inline]
-    fn vec_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
+    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
         let _ = (capacity, exact);
         Err(StorageError::Unsupported)
     }
@@ -142,34 +167,9 @@ where
     B::Alloc: Clone,
 {
     #[inline]
-    fn vec_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
+    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
         let length = self.length();
         self.spawn_handle(VecHeader { capacity, length }, exact)
-    }
-}
-
-pub trait VecBufferNew: VecBuffer {
-    const NEW: Self;
-
-    fn vec_try_alloc(capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
-}
-
-impl<B> VecBufferNew for B
-where
-    B: VecBuffer + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
-{
-    const NEW: Self = Self::NEW;
-
-    #[inline]
-    fn vec_try_alloc(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        Self::alloc_handle_in(
-            Self::NEW_ALLOC,
-            VecHeader {
-                capacity,
-                length: Self::Index::ZERO,
-            },
-            exact,
-        )
     }
 }
 
@@ -200,7 +200,7 @@ impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
     };
 
     #[inline]
-    fn vec_try_alloc(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
+    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
         if !exact || capacity.to_usize() == N {
             Ok(Self::NEW)
         } else {
@@ -211,8 +211,8 @@ impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
 
 impl<'a, T, const N: usize> VecBufferSpawn for InlineBuffer<T, N> {
     #[inline]
-    fn vec_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        Self::vec_try_alloc(capacity, exact)
+    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
+        Self::vec_try_new(capacity, exact)
     }
 }
 

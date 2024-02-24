@@ -8,7 +8,7 @@ use crate::storage::alloc::{AllocHandle, FatAllocHandle, ThinAllocHandle};
 use crate::storage::{Fixed, FixedBuffer, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn};
 use crate::Thin;
 
-use super::buffer::{VecBuffer, VecBufferNew, VecData, VecHeader};
+use super::buffer::{VecBuffer, VecBufferNew, VecBufferSpawn, VecData, VecHeader};
 
 pub trait VecConfigIndex {
     type IndexBuffer<T, I: Index>: VecBuffer<Data = T, Index = I>;
@@ -50,7 +50,7 @@ where
 pub trait VecConfigNew<T>: VecConfig {
     const NEW: Self::Buffer<T>;
 
-    fn vec_try_alloc(capacity: Self::Index, exact: bool) -> Result<Self::Buffer<T>, StorageError>;
+    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self::Buffer<T>, StorageError>;
 }
 
 impl<T, C: VecConfig> VecConfigNew<T> for C
@@ -60,8 +60,29 @@ where
     const NEW: Self::Buffer<T> = Self::Buffer::<T>::NEW;
 
     #[inline]
-    fn vec_try_alloc(capacity: Self::Index, exact: bool) -> Result<Self::Buffer<T>, StorageError> {
-        Self::Buffer::<T>::vec_try_alloc(capacity, exact)
+    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self::Buffer<T>, StorageError> {
+        Self::Buffer::<T>::vec_try_new(capacity, exact)
+    }
+}
+
+pub trait VecConfigSpawn<T>: VecConfig {
+    fn vec_try_spawn(
+        buf: &Self::Buffer<T>,
+        capacity: Self::Index,
+        exact: bool,
+    ) -> Result<Self::Buffer<T>, StorageError>;
+}
+
+impl<T, C: VecConfig> VecConfigSpawn<T> for C
+where
+    Self::Buffer<T>: VecBufferSpawn,
+{
+    fn vec_try_spawn(
+        buf: &Self::Buffer<T>,
+        capacity: Self::Index,
+        exact: bool,
+    ) -> Result<Self::Buffer<T>, StorageError> {
+        Self::Buffer::<T>::vec_try_spawn(buf, capacity, exact)
     }
 }
 
@@ -90,20 +111,20 @@ impl VecConfigIndex for Thin {
     type IndexBuffer<T, I: Index> = ThinAllocHandle<VecData<T, I>, Global>;
 }
 
-pub trait VecAllocIn<T> {
+pub trait VecNewIn<T> {
     type Config: VecConfig;
 
-    fn vec_try_alloc_in(
+    fn vec_try_new_in(
         self,
         capacity: <Self::Config as VecConfig>::Index,
         exact: bool,
     ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError>;
 }
 
-impl<T, C: RawAllocIn> VecAllocIn<T> for C {
+impl<T, C: RawAllocIn> VecNewIn<T> for C {
     type Config = C::RawAlloc;
 
-    fn vec_try_alloc_in(
+    fn vec_try_new_in(
         self,
         capacity: <Self::Config as VecConfig>::Index,
         exact: bool,
@@ -119,10 +140,10 @@ impl<T, C: RawAllocIn> VecAllocIn<T> for C {
     }
 }
 
-impl<'a, T, const N: usize> VecAllocIn<T> for &'a mut [MaybeUninit<T>; N] {
+impl<'a, T, const N: usize> VecNewIn<T> for &'a mut [MaybeUninit<T>; N] {
     type Config = Fixed<'a>;
 
-    fn vec_try_alloc_in(
+    fn vec_try_new_in(
         self,
         mut capacity: <Self::Config as VecConfig>::Index,
         exact: bool,
