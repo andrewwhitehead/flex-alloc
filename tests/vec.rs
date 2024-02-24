@@ -118,6 +118,13 @@ fn test_inline() {
 }
 
 #[test]
+fn vec_clone_inline() {
+    let v = FlexVec::<usize, Inline<10>>::from_slice(SLICE);
+    let v2 = v.clone();
+    assert_eq!(v, v2);
+}
+
+#[test]
 fn test_new_in_array() {
     let mut z = array_storage::<_, 32>();
     let mut b = FlexVec::new_in(&mut z);

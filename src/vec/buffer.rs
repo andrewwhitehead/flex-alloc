@@ -209,6 +209,13 @@ impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
     }
 }
 
+impl<'a, T, const N: usize> VecBufferSpawn for InlineBuffer<T, N> {
+    #[inline]
+    fn vec_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
+        Self::vec_try_alloc(capacity, exact)
+    }
+}
+
 impl<'a, T, I: Index> VecBuffer for FixedBuffer<VecHeader<I>, T> {
     type Data = T;
     type Index = I;
