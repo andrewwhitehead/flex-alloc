@@ -1,9 +1,11 @@
 #[macro_use]
 extern crate criterion;
 
+use core::mem::size_of;
+
 use criterion::{black_box, Criterion};
 
-use flex_vec::{array_buffer, Inline, ThinAlloc, Vec as FlexVec};
+use flex_vec::{aligned_byte_storage, array_storage, Inline, Thin, Vec as FlexVec};
 
 fn standard_compare(c: &mut Criterion) {
     const SMALL_COUNT: usize = 100;
@@ -19,9 +21,9 @@ fn standard_compare(c: &mut Criterion) {
             });
         });
 
-        c.bench_function(&format!("thinvec push {} values", count), |b| {
+        c.bench_function(&format!("flexvec thin push {} values", count), |b| {
             b.iter(|| {
-                let mut buf = FlexVec::<usize, ThinAlloc>::new();
+                let mut buf = FlexVec::<usize, Thin>::new();
                 for value in 0..count {
                     buf.push(black_box(value));
                 }
@@ -57,8 +59,22 @@ fn standard_compare(c: &mut Criterion) {
                 &format!("flexvec fixed({}) push {} values", SMALL_COUNT, count),
                 |b| {
                     b.iter(|| {
-                        let mut buf = array_buffer::<usize, SMALL_COUNT>();
-                        let mut buf = FlexVec::new_fixed(&mut buf);
+                        let mut buf = array_storage::<usize, SMALL_COUNT>();
+                        let mut buf = FlexVec::new_in(&mut buf);
+                        for value in 0..count {
+                            buf.push(black_box(value));
+                        }
+                    });
+                },
+            );
+
+            c.bench_function(
+                &format!("flexvec byte storage push {} values", count),
+                |b| {
+                    b.iter(|| {
+                        let mut buf =
+                            aligned_byte_storage::<usize, { SMALL_COUNT * size_of::<usize>() }>();
+                        let mut buf = FlexVec::new_in(&mut buf);
                         for value in 0..count {
                             buf.push(black_box(value));
                         }

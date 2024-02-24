@@ -1,5 +1,4 @@
-use flex_vec::boxed::Box;
-use flex_vec::storage::Global;
+use flex_vec::{boxed::Box, byte_storage, storage::Global, StorageError};
 
 #[cfg(feature = "alloc")]
 #[test]
@@ -10,9 +9,40 @@ fn test_box_alloc() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn test_box_in() {
+fn test_box_in_alloc() {
     let b = Box::new_in(10u32, Global);
     assert_eq!(*b, 10u32);
+}
+
+#[test]
+fn test_box_zst_in_alloc() {
+    #[derive(Debug, PartialEq)]
+    struct A;
+    let b = Box::new_in(A, Global);
+    assert_eq!(b.as_ref(), &A);
+}
+
+#[test]
+fn test_box_in_byte_buffer() {
+    let mut z = byte_storage::<500>();
+    let b = Box::new_in(10u32, &mut z);
+    assert_eq!(b.as_ref(), &10u32);
+}
+
+#[test]
+fn test_box_zst_in_byte_buffer() {
+    #[derive(Debug, PartialEq)]
+    struct A;
+    let mut z = byte_storage::<500>();
+    let b = Box::new_in(A, &mut z);
+    assert_eq!(b.as_ref(), &A);
+}
+
+#[test]
+fn test_box_in_byte_buffer_over_cap() {
+    let mut z = byte_storage::<3>();
+    let res = Box::try_new_in(10u32, &mut z);
+    assert_eq!(res, Err(StorageError::CapacityLimit));
 }
 
 #[cfg(feature = "alloc")]

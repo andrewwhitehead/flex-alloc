@@ -1,16 +1,14 @@
+use core::fmt;
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::NonNull;
-
-use crate::index::Index;
 
 pub(crate) mod alloc;
 
 pub(crate) mod utils;
 
 pub use self::alloc::{
-    AllocBuffer, AllocBufferNew, AllocBufferParts, AllocHeader, AllocLayout, AllocMethod,
-    FatHandle, Global, RawAlloc, RawAllocIn, RawAllocNew, Thin, ThinHandle,
+    AllocHandleParts, AllocHeader, AllocLayout, Global, RawAlloc, RawAllocIn, RawAllocNew, Thin,
 };
 
 pub trait RawBuffer: Sized {
@@ -21,19 +19,13 @@ pub trait RawBuffer: Sized {
     fn data_ptr_mut(&mut self) -> *mut Self::RawData;
 }
 
-#[derive(Debug, Default)]
-pub struct Alloc<I: Index = usize, M: AllocMethod = Global>(PhantomData<(I, M)>);
-
-#[derive(Debug)]
-pub struct ThinAlloc<I: Index = usize>(PhantomData<I>);
-
 #[repr(C)]
-pub union ByteBuffer<T, const N: usize> {
+pub union ByteStorage<T, const N: usize> {
     _align: [ManuallyDrop<T>; 0],
     data: [MaybeUninit<u8>; N],
 }
 
-impl<T, const N: usize> ByteBuffer<T, N> {
+impl<T, const N: usize> ByteStorage<T, N> {
     pub const fn new() -> Self {
         Self {
             data: unsafe { MaybeUninit::uninit().assume_init() },
@@ -45,16 +37,22 @@ impl<T, const N: usize> ByteBuffer<T, N> {
     }
 }
 
-pub const fn array_buffer<T, const N: usize>() -> [MaybeUninit<T>; N] {
+impl<T, const N: usize> fmt::Debug for ByteStorage<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ByteBuffer").finish_non_exhaustive()
+    }
+}
+
+pub const fn array_storage<T, const N: usize>() -> [MaybeUninit<T>; N] {
     unsafe { MaybeUninit::uninit().assume_init() }
 }
 
-pub const fn byte_buffer<const N: usize>() -> ByteBuffer<u8, N> {
-    ByteBuffer::<u8, N>::new()
+pub const fn byte_storage<const N: usize>() -> ByteStorage<u8, N> {
+    ByteStorage::<u8, N>::new()
 }
 
-pub const fn aligned_byte_buffer<T, const N: usize>() -> ByteBuffer<T, N> {
-    ByteBuffer::<T, N>::new()
+pub const fn aligned_byte_storage<T, const N: usize>() -> ByteStorage<T, N> {
+    ByteStorage::<T, N>::new()
 }
 
 #[derive(Debug)]

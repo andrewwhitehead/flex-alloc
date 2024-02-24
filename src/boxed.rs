@@ -1,6 +1,7 @@
 use core::alloc::Layout;
 use core::any::Any;
 use core::borrow::{Borrow, BorrowMut};
+use core::cmp::Ordering;
 use core::fmt;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
@@ -49,7 +50,7 @@ impl<T: ?Sized, A: RawAlloc> Box<T, A> {
 impl<T, A: RawAlloc> Box<T, A> {
     pub fn new_uninit_in<I>(alloc_in: I) -> Box<MaybeUninit<T>, A>
     where
-        I: RawAllocIn<Alloc = A>,
+        I: RawAllocIn<RawAlloc = A>,
     {
         match alloc_in.try_alloc_in(Layout::new::<MaybeUninit<T>>()) {
             Ok((data, alloc)) => unsafe { Box::from_parts(data.cast(), alloc) },
@@ -59,7 +60,7 @@ impl<T, A: RawAlloc> Box<T, A> {
 
     pub fn new_in<I>(value: T, alloc_in: I) -> Self
     where
-        I: RawAllocIn<Alloc = A>,
+        I: RawAllocIn<RawAlloc = A>,
     {
         let boxed = Self::new_uninit_in(alloc_in);
         Box::write(boxed, value)
@@ -67,7 +68,7 @@ impl<T, A: RawAlloc> Box<T, A> {
 
     pub fn try_new_in<I>(value: T, alloc_in: I) -> Result<Self, StorageError>
     where
-        I: RawAllocIn<Alloc = A>,
+        I: RawAllocIn<RawAlloc = A>,
     {
         let boxed = Self::try_new_uninit_in(alloc_in)?;
         Ok(Box::write(boxed, value))
@@ -75,7 +76,7 @@ impl<T, A: RawAlloc> Box<T, A> {
 
     pub fn try_new_uninit_in<I>(alloc_in: I) -> Result<Box<MaybeUninit<T>, A>, StorageError>
     where
-        I: RawAllocIn<Alloc = A>,
+        I: RawAllocIn<RawAlloc = A>,
     {
         let (data, alloc) = alloc_in.try_alloc_in(Layout::new::<MaybeUninit<T>>())?;
         Ok(unsafe { Box::from_parts(data.cast(), alloc) })
@@ -104,7 +105,7 @@ impl<T, A: RawAlloc> Box<T, A> {
 
     pub fn pin_in<I>(value: T, alloc_in: I) -> Pin<Self>
     where
-        I: RawAllocIn<Alloc = A>,
+        I: RawAllocIn<RawAlloc = A>,
     {
         Pin::from(Self::new_in(value, alloc_in))
     }
@@ -150,7 +151,7 @@ impl<T, A: RawAlloc> Box<[T], A> {
 impl<T, A: RawAlloc> Box<[T], A> {
     pub fn new_uninit_slice_in<I>(length: usize, alloc_in: I) -> Box<[MaybeUninit<T>], A>
     where
-        I: RawAllocIn<Alloc = A>,
+        I: RawAllocIn<RawAlloc = A>,
     {
         match Self::try_new_uninit_slice_in(length, alloc_in) {
             Ok(boxed) => boxed,
@@ -163,7 +164,7 @@ impl<T, A: RawAlloc> Box<[T], A> {
         alloc_in: I,
     ) -> Result<Box<[MaybeUninit<T>], A>, StorageError>
     where
-        I: RawAllocIn<Alloc = A>,
+        I: RawAllocIn<RawAlloc = A>,
     {
         let layout = Layout::array::<MaybeUninit<T>>(length)?;
         let (data, alloc) = alloc_in.try_alloc_in(layout)?;
@@ -402,16 +403,13 @@ impl<T: ?Sized, A: RawAlloc> From<Box<T, A>> for Pin<Box<T, A>> {
     }
 }
 
-// #[cfg(feature = "alloc")]
-// impl<T: ?Sized, S> From<alloc::boxed::Box<T>> for Box<T, S>
-// where
-//     S: StorageNew + StorageWithAlloc,
-// {
-//     fn from(boxed: alloc::boxed::Box<T>) -> Self {
-//         let ptr = alloc::boxed::Box::into_raw(boxed);
-//         unsafe { Box::from_parts(NonNull::new_unchecked(ptr), S::NEW) }
-//     }
-// }
+#[cfg(feature = "alloc")]
+impl<T: ?Sized> From<alloc::boxed::Box<T>> for Box<T, Global> {
+    fn from(boxed: alloc::boxed::Box<T>) -> Self {
+        let ptr = alloc::boxed::Box::into_raw(boxed);
+        unsafe { Box::from_parts(NonNull::new_unchecked(ptr), Global) }
+    }
+}
 
 // #[cfg(feature = "alloc")]
 // impl<T, S> From<alloc::vec::Vec<T>> for Box<[T], S>
@@ -429,6 +427,29 @@ impl<T: ?Sized, A: RawAlloc> From<Box<T, A>> for Pin<Box<T, A>> {
 //     }
 // }
 
+impl<T: ?Sized + PartialEq, A: RawAlloc> PartialEq for Box<T, A> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        PartialEq::eq(&**self, &**other)
+    }
+}
+
+impl<T: ?Sized + Eq, A: RawAlloc> Eq for Box<T, A> {}
+
+impl<T: ?Sized + PartialOrd, A: RawAlloc> PartialOrd for Box<T, A> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
+    }
+}
+
+impl<T: ?Sized + Ord, A: RawAlloc> Ord for Box<T, A> {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        Ord::cmp(&**self, &**other)
+    }
+}
+
 impl<T: ?Sized, A: RawAlloc> Unpin for Box<T, A> {}
 
 // #[cfg(feature = "zeroize")]
@@ -445,3 +466,4 @@ impl<T: ?Sized, A: RawAlloc> Unpin for Box<T, A> {}
 // try_new_zeroed
 // try_new_zeroed_in
 // try_new_zeroed_slice
+// misc traits

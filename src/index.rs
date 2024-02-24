@@ -1,5 +1,7 @@
 use core::fmt::{Debug, Display};
 
+use crate::storage::utils::min_non_zero_cap;
+
 pub trait Index:
     Copy
     + Clone
@@ -93,5 +95,34 @@ impl Index for usize {
 
     fn saturating_mul(self, val: usize) -> Self {
         self.saturating_mul(val)
+    }
+}
+
+pub trait Grow {
+    fn next_capacity<T, I: Index>(prev: I, minimum: I) -> I;
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GrowExact;
+
+impl Grow for GrowExact {
+    #[inline]
+    fn next_capacity<T, I: Index>(_prev: I, minimum: I) -> I {
+        minimum
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GrowDoubling;
+
+impl Grow for GrowDoubling {
+    #[inline]
+    fn next_capacity<T, I: Index>(prev: I, minimum: I) -> I {
+        let preferred = if prev == I::ZERO {
+            I::from_usize(min_non_zero_cap::<T>())
+        } else {
+            prev.saturating_mul(2)
+        };
+        preferred.max(minimum)
     }
 }

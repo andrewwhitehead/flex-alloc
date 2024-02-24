@@ -6,13 +6,11 @@ use core::ptr;
 use core::slice;
 
 use crate::error::{InsertionError, StorageError};
-use crate::index::Index;
-use crate::storage::{Alloc, Fixed, RawBuffer};
+use crate::index::{Grow, Index};
+use crate::storage::{Global, RawBuffer};
 
-use self::buffer::{IntoFixedVec, VecBuffer, VecBufferSpawn, VecHeader};
-use self::config::{
-    Grow, VecConfig, VecConfigAlloc, VecConfigAllocIn, VecConfigAllocParts, VecConfigNew,
-};
+use self::buffer::{VecBuffer, VecBufferSpawn};
+use self::config::{VecAllocIn, VecConfig, VecConfigAllocator, VecConfigNew};
 use self::insert::Inserter;
 
 pub use self::{drain::Drain, into_iter::IntoIter, splice::Splice};
@@ -48,7 +46,7 @@ fn bounds<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Vec<T, C: VecConfig = Alloc> {
+pub struct Vec<T, C: VecConfig = Global> {
     buffer: C::Buffer<T>,
 }
 
@@ -56,11 +54,9 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
     pub const fn new() -> Self {
         Self { buffer: C::NEW }
     }
-}
 
-impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
     pub fn try_with_capacity(capacity: C::Index) -> Result<Self, StorageError> {
-        let buffer = C::vec_with_capacity(capacity)?;
+        let buffer = C::vec_try_alloc(capacity, false)?;
         Ok(Self { buffer })
     }
 
@@ -96,35 +92,49 @@ impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
     }
 }
 
-impl<T, C: VecConfigAllocIn<T>> Vec<T, C> {
+impl<T, C: VecConfigAllocator<T>> Vec<T, C> {
     pub fn allocator(&self) -> &C::Alloc {
         C::allocator(&self.buffer)
     }
+}
 
-    pub fn new_in(alloc: C::Alloc) -> Self {
-        Self {
-            buffer: C::vec_new_in(alloc),
+impl<T, C: VecConfig> Vec<T, C> {
+    pub fn new_in<A>(alloc_in: A) -> Self
+    where
+        A: VecAllocIn<T, Config = C>,
+    {
+        match A::vec_try_alloc_in(alloc_in, C::Index::ZERO, false) {
+            Ok(buffer) => Self { buffer },
+            Err(err) => err.panic(),
         }
     }
 
-    pub fn try_with_capacity_in(capacity: C::Index, alloc: C::Alloc) -> Result<Self, StorageError> {
-        let buffer = C::vec_with_capacity_in(capacity, alloc)?;
-        Ok(Self { buffer })
+    pub fn try_new_in<A>(alloc_in: A) -> Result<Self, StorageError>
+    where
+        A: VecAllocIn<T, Config = C>,
+    {
+        Ok(Self {
+            buffer: A::vec_try_alloc_in(alloc_in, C::Index::ZERO, false)?,
+        })
     }
 
-    pub fn with_capacity_in(capacity: C::Index, alloc: C::Alloc) -> Self {
-        match Self::try_with_capacity_in(capacity, alloc) {
+    pub fn with_capacity_in<A>(capacity: C::Index, alloc_in: A) -> Self
+    where
+        A: VecAllocIn<T, Config = C>,
+    {
+        match Self::try_with_capacity_in(capacity, alloc_in) {
             Ok(res) => res,
             Err(error) => error.panic(),
         }
     }
-}
 
-impl<'a, T: 'a> Vec<T, Fixed<'a>> {
-    pub fn new_fixed(source: impl IntoFixedVec<'a, T>) -> Self {
-        Self {
-            buffer: source.into_fixed_vec(),
-        }
+    pub fn try_with_capacity_in<A>(capacity: C::Index, alloc_in: A) -> Result<Self, StorageError>
+    where
+        A: VecAllocIn<T, Config = C>,
+    {
+        Ok(Self {
+            buffer: A::vec_try_alloc_in(alloc_in, capacity, false)?,
+        })
     }
 }
 
@@ -205,9 +215,9 @@ impl<T, C: VecConfig> Vec<T, C> {
             return Err(StorageError::CapacityLimit);
         };
         if !exact {
-            capacity = C::Grow::next_capacity::<T>(self.buffer.capacity(), capacity);
+            capacity = C::Grow::next_capacity::<T, _>(self.buffer.capacity(), capacity);
         }
-        self.buffer.vec_resize(capacity)?;
+        self.buffer.vec_resize(capacity, false)?;
         Ok(())
     }
 
@@ -610,7 +620,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     pub fn try_shrink_to(&mut self, min_capacity: C::Index) -> Result<(), StorageError> {
         let len = self.buffer.length().max(min_capacity);
         if self.buffer.capacity() != len {
-            self.buffer.vec_resize(len)?;
+            self.buffer.vec_resize(len, true)?;
         }
         Ok(())
     }
@@ -638,6 +648,7 @@ impl<T, C: VecConfig> Vec<T, C> {
 
     pub fn split_off(&mut self, index: C::Index) -> Self
     where
+        // FIXME move to new trait:
         C::Buffer<T>: VecBufferSpawn,
     {
         // FIXME: add marker trait for buffers that support spawn
@@ -647,7 +658,7 @@ impl<T, C: VecConfig> Vec<T, C> {
             index_panic();
         }
         let move_len = C::Index::from_usize(len - index_usize);
-        match self.buffer.vec_spawn(move_len) {
+        match self.buffer.vec_spawn(move_len, false) {
             Ok(mut buffer) => {
                 if index_usize == 0 {
                     mem::swap(&mut buffer, &mut self.buffer);
@@ -762,11 +773,12 @@ impl<T, C: VecConfig> BorrowMut<[T]> for Vec<T, C> {
 impl<T, C: VecConfig> Clone for Vec<T, C>
 where
     T: Clone,
+    // FIXME: move to new trait:
     C::Buffer<T>: VecBufferSpawn,
 {
     fn clone(&self) -> Self {
         let mut inst = Self {
-            buffer: match self.buffer.vec_spawn(self.buffer.length()) {
+            buffer: match self.buffer.vec_spawn(self.buffer.length(), false) {
                 Ok(buf) => buf,
                 Err(err) => err.panic(),
             },
@@ -841,7 +853,7 @@ impl<'a, T: Clone + 'a, C: VecConfig> Extend<&'a T> for Vec<T, C> {
     }
 }
 
-impl<T, C: VecConfigAlloc<T>> FromIterator<T> for Vec<T, C> {
+impl<T, C: VecConfigNew<T>> FromIterator<T> for Vec<T, C> {
     #[inline]
     fn from_iter<A: IntoIterator<Item = T>>(iter: A) -> Self {
         let iter = iter.into_iter();
@@ -883,54 +895,54 @@ where
 //     }
 // }
 
-#[cfg(feature = "alloc")]
-impl<T, C> From<alloc::boxed::Box<[T]>> for Vec<T, C>
-where
-    C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-{
-    fn from(vec: alloc::boxed::Box<[T]>) -> Self {
-        alloc::vec::Vec::<T>::from(vec).into()
-    }
-}
+// #[cfg(feature = "alloc")]
+// impl<T, C> From<alloc::boxed::Box<[T]>> for Vec<T, C>
+// where
+//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
+// {
+//     fn from(vec: alloc::boxed::Box<[T]>) -> Self {
+//         alloc::vec::Vec::<T>::from(vec).into()
+//     }
+// }
 
-#[cfg(feature = "alloc")]
-impl<T, C> From<Vec<T, C>> for alloc::boxed::Box<[T]>
-where
-    C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-{
-    fn from(vec: Vec<T, C>) -> Self {
-        alloc::vec::Vec::<T>::from(vec).into_boxed_slice()
-    }
-}
+// #[cfg(feature = "alloc")]
+// impl<T, C> From<Vec<T, C>> for alloc::boxed::Box<[T]>
+// where
+//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
+// {
+//     fn from(vec: Vec<T, C>) -> Self {
+//         alloc::vec::Vec::<T>::from(vec).into_boxed_slice()
+//     }
+// }
 
-#[cfg(feature = "alloc")]
-impl<T, C> From<alloc::vec::Vec<T>> for Vec<T, C>
-where
-    C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-{
-    fn from(vec: alloc::vec::Vec<T>) -> Self {
-        let capacity = vec.capacity();
-        let length = vec.len();
-        let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
-        Self {
-            buffer: C::vec_from_parts(VecHeader { capacity, length }, data, Alloc::default()),
-        }
-    }
-}
+// #[cfg(feature = "alloc")]
+// impl<T, C> From<alloc::vec::Vec<T>> for Vec<T, C>
+// where
+//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
+// {
+//     fn from(vec: alloc::vec::Vec<T>) -> Self {
+//         let capacity = vec.capacity();
+//         let length = vec.len();
+//         let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
+//         Self {
+//             buffer: C::vec_from_parts(VecHeader { capacity, length }, data, Alloc::default()),
+//         }
+//     }
+// }
 
-#[cfg(feature = "alloc")]
-impl<T, C> From<Vec<T, C>> for alloc::vec::Vec<T>
-where
-    C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-{
-    fn from(vec: Vec<T, C>) -> Self {
-        let mut buffer = ManuallyDrop::new(vec.into_inner());
-        let capacity = buffer.capacity();
-        let length = buffer.length();
-        let data = buffer.data_ptr_mut();
-        unsafe { alloc::vec::Vec::from_raw_parts(data, length, capacity) }
-    }
-}
+// #[cfg(feature = "alloc")]
+// impl<T, C> From<Vec<T, C>> for alloc::vec::Vec<T>
+// where
+//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
+// {
+//     fn from(vec: Vec<T, C>) -> Self {
+//         let mut buffer = ManuallyDrop::new(vec.into_inner());
+//         let capacity = buffer.capacity();
+//         let length = buffer.length();
+//         let data = buffer.data_ptr_mut();
+//         unsafe { alloc::vec::Vec::from_raw_parts(data, length, capacity) }
+//     }
+// }
 
 // #[cfg(feature = "alloc")]
 // impl<'b, T: Clone, S> From<alloc::borrow::Cow<'b, [T]>> for Vec<T, S>
@@ -952,31 +964,31 @@ where
 //     }
 // }
 
-impl<T: Clone, C: VecConfigAlloc<T>> From<&[T]> for Vec<T, C> {
+impl<T: Clone, C: VecConfigNew<T>> From<&[T]> for Vec<T, C> {
     fn from(data: &[T]) -> Self {
         Self::from_slice(data)
     }
 }
 
-impl<T: Clone, C: VecConfigAlloc<T>> From<&mut [T]> for Vec<T, C> {
+impl<T: Clone, C: VecConfigNew<T>> From<&mut [T]> for Vec<T, C> {
     fn from(data: &mut [T]) -> Self {
         Self::from_slice(data)
     }
 }
 
-impl<T: Clone, C: VecConfigAlloc<T>, const N: usize> From<&[T; N]> for Vec<T, C> {
+impl<T: Clone, C: VecConfigNew<T>, const N: usize> From<&[T; N]> for Vec<T, C> {
     fn from(data: &[T; N]) -> Self {
         Self::from_slice(data)
     }
 }
 
-impl<T: Clone, C: VecConfigAlloc<T>, const N: usize> From<&mut [T; N]> for Vec<T, C> {
+impl<T: Clone, C: VecConfigNew<T>, const N: usize> From<&mut [T; N]> for Vec<T, C> {
     fn from(data: &mut [T; N]) -> Self {
         Self::from_slice(data)
     }
 }
 
-impl<T, C: VecConfigAlloc<T>, const N: usize> From<[T; N]> for Vec<T, C> {
+impl<T, C: VecConfigNew<T>, const N: usize> From<[T; N]> for Vec<T, C> {
     fn from(data: [T; N]) -> Self {
         Self::from_iter(data)
     }
@@ -1151,16 +1163,16 @@ where
 // TryFrom<Vec<T>> for [T; N]
 // io::Write
 // dedup_by_key
-// push_within_capacity: would replace try_push, wait for stabilization
+// push_within_capacity
 // leak
 
 /// ```compile_fail,E0597
-/// use flex_vec::{array_buffer, Vec};
+/// use flex_vec::{byte_storage, Vec};
 ///
 /// fn run<F: FnOnce() -> () + 'static>(f: F) { f() }
 ///
-/// let mut buf = array_buffer::<usize, 10>();
-/// let mut v = Vec::new_fixed(&mut buf);
+/// let mut buf = byte_storage::<10>();
+/// let mut v = Vec::<usize, _>::new_in(&mut buf);
 /// run(move || v.clear());
 /// ```
 fn _lifetime_check() {}

@@ -4,16 +4,15 @@ use core::ops::Range;
 use core::ptr;
 
 use super::buffer::VecBuffer;
-use super::config::Grow;
 use super::drain::Drain;
 use super::index_panic;
-use crate::index::Index;
+use crate::index::{Grow, Index};
 
 pub struct Splice<'s, I, B, G>
 where
     I: Iterator,
     B: VecBuffer<Data = I::Item>,
-    G: Grow<B::Index>,
+    G: Grow,
 {
     drain: Drain<'s, B>,
     extend: Peekable<I>,
@@ -24,7 +23,7 @@ impl<'s, I, B, G> Splice<'s, I, B, G>
 where
     I: Iterator,
     B: VecBuffer<Data = I::Item>,
-    G: Grow<B::Index>,
+    G: Grow,
 {
     pub(super) fn new(vec: &'s mut B, extend: I, range: Range<usize>) -> Self {
         let drain = Drain::new(vec, range);
@@ -44,7 +43,7 @@ impl<'s, I, B, G> Iterator for Splice<'s, I, B, G>
 where
     I: Iterator,
     B: VecBuffer<Data = I::Item>,
-    G: Grow<B::Index>,
+    G: Grow,
 {
     type Item = I::Item;
 
@@ -70,7 +69,7 @@ impl<'s, I, B, G> DoubleEndedIterator for Splice<'s, I, B, G>
 where
     I: Iterator,
     B: VecBuffer<Data = I::Item>,
-    G: Grow<B::Index>,
+    G: Grow,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.drain.next_back()
@@ -81,7 +80,7 @@ impl<'s, I, B, G> ExactSizeIterator for Splice<'s, I, B, G>
 where
     I: Iterator,
     B: VecBuffer<Data = I::Item>,
-    G: Grow<B::Index>,
+    G: Grow,
 {
 }
 
@@ -89,7 +88,7 @@ impl<'s, I, B, G> FusedIterator for Splice<'s, I, B, G>
 where
     I: Iterator,
     B: VecBuffer<Data = I::Item>,
-    G: Grow<B::Index>,
+    G: Grow,
 {
 }
 
@@ -97,7 +96,7 @@ impl<'s, I, B, G> Drop for Splice<'s, I, B, G>
 where
     I: Iterator,
     B: VecBuffer<Data = I::Item>,
-    G: Grow<B::Index>,
+    G: Grow,
 {
     fn drop(&mut self) {
         self.drain.clear_remain();
@@ -120,8 +119,8 @@ where
                 let new_cap =
                     B::Index::try_from_usize(buf_cap.to_usize() + min_remain - cap_remain)
                         .expect("exceeded range of capacity");
-                let new_cap = G::next_capacity::<B::Data>(buf_cap, new_cap);
-                match self.drain.buf.vec_resize(new_cap) {
+                let new_cap = G::next_capacity::<B::Data, _>(buf_cap, new_cap);
+                match self.drain.buf.vec_resize(new_cap, false) {
                     Ok(_) => (),
                     Err(err) => err.panic(),
                 }
