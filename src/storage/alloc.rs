@@ -173,6 +173,7 @@ pub struct FatAllocHandle<Meta: AllocLayout, Alloc: RawAlloc> {
 }
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> FatAllocHandle<Meta, Alloc> {
+    #[inline]
     const fn new(header: Meta::Header, data: NonNull<u8>, alloc: Alloc) -> Self {
         Self {
             header,
@@ -181,6 +182,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> FatAllocHandle<Meta, Alloc> {
         }
     }
 
+    #[inline]
     pub const fn dangling(header: Meta::Header, alloc: Alloc) -> Self {
         Self::new(header, NonNull::<Meta::Data>::dangling().cast(), alloc)
     }
@@ -190,6 +192,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> FatAllocHandle<Meta, Alloc> {
         ptr::eq(self.data.as_ptr(), NonNull::dangling().as_ptr())
     }
 
+    #[inline]
     pub fn into_raw_parts(self) -> (Meta::Header, NonNull<u8>, Alloc) {
         let parts = ManuallyDrop::new(self);
         let header = unsafe { ptr::read(&parts.header) };
@@ -384,10 +387,12 @@ pub struct ThinAllocHandle<Meta: AllocLayout, Alloc: RawAlloc> {
 }
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> ThinAllocHandle<Meta, Alloc> {
+    #[inline]
     const fn new(data: ThinPtr<Meta>, alloc: Alloc) -> Self {
         ThinAllocHandle { data, alloc }
     }
 
+    #[inline]
     pub const fn dangling(alloc: Alloc) -> Self {
         Self::new(ThinPtr::dangling(), alloc)
     }
@@ -456,13 +461,11 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
         let data_layout = Meta::layout(&header)?;
         let alloc_layout = Self::combined_layout(data_layout)?;
         let (ptr, alloc) = alloc_in.try_alloc_in(alloc_layout)?;
-        if ptr.len() == 0 {
-            return if alloc_layout.size() == 0 {
-                Ok(ThinAllocHandle::dangling(alloc))
-            } else {
-                Err(StorageError::CapacityLimit)
-            };
-        } else if ptr.len() < ThinPtr::<Meta>::DATA_OFFSET {
+        if ptr.len() < ThinPtr::<Meta>::DATA_OFFSET {
+            if ptr.len() == 0 && alloc_layout.size() == 0 {
+                return Ok(ThinAllocHandle::dangling(alloc));
+            }
+            unsafe { alloc.release(ptr.cast(), alloc_layout) };
             return Err(StorageError::CapacityLimit);
         }
         if !exact && alloc_layout.size() != ptr.len() {

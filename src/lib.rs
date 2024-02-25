@@ -21,5 +21,4 @@ pub mod vec;
 pub use {
     self::error::{InsertionError, StorageError},
     self::storage::{aligned_byte_storage, array_storage, byte_storage, Fixed, Inline, Thin},
-    self::vec::Vec,
 };

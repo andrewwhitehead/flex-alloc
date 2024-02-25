@@ -93,6 +93,21 @@ pub struct InlineBuffer<T, const N: usize> {
     pub length: usize,
 }
 
+impl<T, const N: usize> InlineBuffer<T, N> {
+    pub const fn new() -> Self {
+        Self {
+            data: unsafe { MaybeUninit::uninit().assume_init() },
+            length: 0,
+        }
+    }
+}
+
+impl<T, const N: usize> Default for InlineBuffer<T, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a, T: 'a, const N: usize> RawBuffer for InlineBuffer<T, N> {
     type RawData = T;
 

@@ -128,7 +128,7 @@ where
     }
 }
 
-pub trait VecBufferNew: VecBuffer {
+pub trait VecBufferNew: VecBufferSpawn {
     const NEW: Self;
 
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
@@ -136,7 +136,7 @@ pub trait VecBufferNew: VecBuffer {
 
 impl<B> VecBufferNew for B
 where
-    B: VecBuffer + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
+    B: VecBufferSpawn + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
 {
     const NEW: Self = Self::NEW;
 
@@ -194,10 +194,7 @@ impl<'a, T: 'a, const N: usize> VecBuffer for InlineBuffer<T, N> {
 }
 
 impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
-    const NEW: Self = InlineBuffer {
-        data: unsafe { MaybeUninit::uninit().assume_init() },
-        length: 0,
-    };
+    const NEW: Self = InlineBuffer::new();
 
     #[inline]
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {

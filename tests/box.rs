@@ -66,17 +66,6 @@ fn test_box_clone() {
     assert_eq!(*b3, 10u32);
 }
 
-// #[cfg(feature = "alloc")]
-// #[test]
-// fn test_vec_into_boxed_slice() {
-//     let vec = Vec::<_, AllocGlobal>::from_slice(&[1, 2, 3, 4]);
-//     let boxed: Box<_, AllocGlobal> = vec.into();
-//     assert_eq!(&*boxed, &[1, 2, 3, 4]);
-//     let vec = Vec::<_, AllocGlobal>::from(boxed);
-//     assert_eq!(&*vec, &[1, 2, 3, 4]);
-//     assert_eq!(vec.capacity(), 4);
-// }
-
 #[cfg(feature = "alloc")]
 #[test]
 fn test_empty_str() {

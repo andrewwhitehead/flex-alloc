@@ -5,7 +5,7 @@ use core::mem::size_of;
 
 use criterion::{black_box, Criterion};
 
-use flex_vec::{aligned_byte_storage, array_storage, Inline, Thin, Vec as FlexVec};
+use flex_vec::{aligned_byte_storage, array_storage, vec::Vec as FlexVec, Inline, Thin};
 
 fn standard_compare(c: &mut Criterion) {
     const SMALL_COUNT: usize = 100;
@@ -35,6 +35,18 @@ fn standard_compare(c: &mut Criterion) {
             |b| {
                 b.iter(|| {
                     let mut buf = FlexVec::<usize>::with_capacity(count as usize);
+                    for value in 0..count {
+                        buf.push(black_box(value));
+                    }
+                });
+            },
+        );
+
+        c.bench_function(
+            &format!("flexvec thin with_capacity({0}) push {0} values", count),
+            |b| {
+                b.iter(|| {
+                    let mut buf = FlexVec::<usize, Thin>::with_capacity(count as usize);
                     for value in 0..count {
                         buf.push(black_box(value));
                     }

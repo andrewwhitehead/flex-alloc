@@ -2,15 +2,18 @@ use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
-use core::ptr;
+use core::ptr::{self, NonNull};
 use core::slice;
 
+use crate::boxed::Box;
 use crate::error::{InsertionError, StorageError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
 
 use self::buffer::VecBuffer;
-use self::config::{VecConfig, VecConfigAllocator, VecConfigNew, VecConfigSpawn, VecNewIn};
+use self::config::{
+    VecConfig, VecConfigAllocParts, VecConfigAllocator, VecConfigNew, VecConfigSpawn, VecNewIn,
+};
 use self::insert::Inserter;
 
 pub use self::{drain::Drain, into_iter::IntoIter, splice::Splice};
@@ -19,7 +22,7 @@ pub mod buffer;
 pub mod config;
 
 mod drain;
-mod insert;
+pub(crate) mod insert;
 mod into_iter;
 mod splice;
 
@@ -92,12 +95,6 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
     }
 }
 
-impl<T, C: VecConfigAllocator<T>> Vec<T, C> {
-    pub fn allocator(&self) -> &C::Alloc {
-        C::allocator(&self.buffer)
-    }
-}
-
 impl<T, C: VecConfig> Vec<T, C> {
     pub fn new_in<A>(alloc_in: A) -> Self
     where
@@ -143,6 +140,45 @@ impl<T, C: VecConfig> Vec<T, C> {
     fn into_inner(self) -> C::Buffer<T> {
         let me = ManuallyDrop::new(self);
         unsafe { ptr::read(&me.buffer) }
+    }
+}
+
+impl<T, C: VecConfigAllocator<T>> Vec<T, C> {
+    pub fn allocator(&self) -> &C::Alloc {
+        C::allocator(&self.buffer)
+    }
+}
+
+impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
+    pub fn into_boxed_slice(mut self) -> Box<[T], C::Alloc> {
+        self.shrink_to_fit();
+        let (data, length, capacity, alloc) = self.into_parts();
+        assert_eq!(capacity, length);
+        unsafe { Box::slice_from_parts(data, alloc, length.to_usize()) }
+    }
+
+    pub fn try_into_boxed_slice(mut self) -> Result<Box<[T], C::Alloc>, StorageError> {
+        self.try_shrink_to_fit()?;
+        let (data, length, capacity, alloc) = self.into_parts();
+        assert_eq!(capacity, length);
+        Ok(unsafe { Box::slice_from_parts(data, alloc, length.to_usize()) })
+    }
+
+    #[inline]
+    pub(crate) fn into_parts(self) -> (NonNull<T>, C::Index, C::Index, C::Alloc) {
+        C::vec_into_parts(self.into_inner())
+    }
+
+    #[inline]
+    pub(crate) unsafe fn from_parts(
+        data: NonNull<T>,
+        length: C::Index,
+        capacity: C::Index,
+        alloc: C::Alloc,
+    ) -> Self {
+        Self {
+            buffer: C::vec_from_parts(data, length, capacity, alloc),
+        }
     }
 }
 
@@ -192,6 +228,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.buffer.set_length(length)
     }
 
+    #[inline]
     pub fn reserve(&mut self, reserve: C::Index) {
         match self.try_reserve(reserve) {
             Ok(_) => (),
@@ -199,6 +236,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    #[inline]
     pub fn try_reserve(&mut self, reserve: C::Index) -> Result<(), StorageError> {
         self._try_reserve(reserve.into(), false)
     }
@@ -221,6 +259,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    #[inline]
     pub fn reserve_exact(&mut self, reserve: usize) {
         match self.try_reserve_exact(reserve) {
             Ok(_) => (),
@@ -228,6 +267,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    #[inline]
     pub fn try_reserve_exact(&mut self, reserve: usize) -> Result<(), StorageError> {
         self._try_reserve(reserve.into(), true)
     }
@@ -255,6 +295,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    #[inline]
     pub fn dedup(&mut self)
     where
         T: Eq,
@@ -292,6 +333,16 @@ impl<T, C: VecConfig> Vec<T, C> {
         unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) }
     }
 
+    #[inline]
+    pub fn dedup_by_key<F, K>(&mut self, mut key_f: F)
+    where
+        F: FnMut(&mut T) -> K,
+        K: PartialEq,
+    {
+        self.dedup_by(|a, b| key_f(a) == key_f(b))
+    }
+
+    #[inline]
     pub fn drain<R>(&mut self, range: R) -> Drain<'_, C::Buffer<T>>
     where
         R: RangeBounds<C::Index>,
@@ -503,6 +554,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    #[inline]
     pub fn resize(&mut self, new_len: C::Index, value: T)
     where
         T: Clone,
@@ -538,6 +590,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    #[inline]
     pub fn resize_with<F>(&mut self, new_len: C::Index, f: F)
     where
         F: FnMut() -> T,
@@ -573,6 +626,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    #[inline]
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&T) -> bool,
@@ -610,6 +664,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         unsafe { self.buffer.set_length(C::Index::from_usize(len)) };
     }
 
+    #[inline]
     pub fn shrink_to(&mut self, min_capacity: C::Index) {
         match self.try_shrink_to(min_capacity) {
             Ok(_) => (),
@@ -625,13 +680,20 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    #[inline]
     pub fn shrink_to_fit(&mut self) {
-        match self.try_shrink_to(self.buffer.length()) {
+        match self.try_shrink_to_fit() {
             Ok(_) => (),
             Err(err) => err.panic(),
         }
     }
 
+    #[inline]
+    pub fn try_shrink_to_fit(&mut self) -> Result<(), StorageError> {
+        self.try_shrink_to(self.buffer.length())
+    }
+
+    #[inline]
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         let length = self.len().into();
         &mut self.buffer.as_uninit_slice()[length..]
@@ -650,7 +712,6 @@ impl<T, C: VecConfig> Vec<T, C> {
     where
         C: VecConfigSpawn<T>,
     {
-        // FIXME: add marker trait for buffers that support spawn
         let len = self.buffer.length().to_usize();
         let index_usize = index.to_usize();
         if index_usize >= len {
@@ -723,22 +784,6 @@ impl<T, C: VecConfig> Vec<T, C> {
             }
         }
     }
-
-    // pub fn into_boxed_slice(mut self) -> Box<[T], S> {
-    //     self.shrink_to_fit();
-    //     let (buffer, length) = self.into_parts();
-    //     assert_eq!(buffer.capacity(), length);
-    //     let boxed = Box::from_buffer(buffer);
-    //     unsafe { boxed.assume_init() }
-    // }
-
-    // pub fn try_into_boxed_slice(mut self) -> Result<Box<[T], S>, StorageError> {
-    //     self.try_shrink_to_fit()?;
-    //     let (buffer, length) = self.into_parts();
-    //     assert_eq!(buffer.capacity(), length);
-    //     let boxed = Box::from_buffer(buffer);
-    //     Ok(unsafe { boxed.assume_init() })
-    // }
 }
 
 impl<T, C: VecConfig> AsRef<[T]> for Vec<T, C> {
@@ -791,6 +836,7 @@ impl<T, C: VecConfig> Default for Vec<T, C>
 where
     C::Buffer<T>: Default,
 {
+    #[inline]
     fn default() -> Self {
         Self {
             buffer: C::Buffer::default(),
@@ -878,65 +924,62 @@ where
 {
 }
 
-// impl<T, S: Storage> From<Box<[T], S>> for Vec<T, S> {
-//     fn from(boxed: Box<[T], S>) -> Self {
-//         let (ptr, storage, length) = Box::slice_into_parts(boxed);
-//         unsafe {
-//             let repr = <[T]>::from_ptr_capacity(ptr.cast(), length);
-//             let buffer = Buffer::from_parts(repr, storage, length);
-//             Self::from_parts(buffer, length)
-//         }
-//     }
-// }
+impl<T, C: VecConfigAllocParts<T>> From<Box<[T], C::Alloc>> for Vec<T, C> {
+    fn from(boxed: Box<[T], C::Alloc>) -> Self {
+        let (ptr, alloc) = Box::into_parts(boxed);
+        let Some(length) = C::Index::try_from_usize(ptr.len()) else {
+            index_panic();
+        };
+        unsafe { Self::from_parts(ptr.cast(), length, length, alloc) }
+    }
+}
 
-// #[cfg(feature = "alloc")]
-// impl<T, C> From<alloc::boxed::Box<[T]>> for Vec<T, C>
-// where
-//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-// {
-//     fn from(vec: alloc::boxed::Box<[T]>) -> Self {
-//         alloc::vec::Vec::<T>::from(vec).into()
-//     }
-// }
+#[cfg(feature = "alloc")]
+impl<T, C> From<alloc::boxed::Box<[T]>> for Vec<T, C>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: alloc::boxed::Box<[T]>) -> Self {
+        alloc::vec::Vec::<T>::from(vec).into()
+    }
+}
 
-// #[cfg(feature = "alloc")]
-// impl<T, C> From<Vec<T, C>> for alloc::boxed::Box<[T]>
-// where
-//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-// {
-//     fn from(vec: Vec<T, C>) -> Self {
-//         alloc::vec::Vec::<T>::from(vec).into_boxed_slice()
-//     }
-// }
+#[cfg(feature = "alloc")]
+impl<T, C> From<Vec<T, C>> for alloc::boxed::Box<[T]>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: Vec<T, C>) -> Self {
+        alloc::vec::Vec::<T>::from(vec).into_boxed_slice()
+    }
+}
 
-// #[cfg(feature = "alloc")]
-// impl<T, C> From<alloc::vec::Vec<T>> for Vec<T, C>
-// where
-//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-// {
-//     fn from(vec: alloc::vec::Vec<T>) -> Self {
-//         let capacity = vec.capacity();
-//         let length = vec.len();
-//         let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
-//         Self {
-//             buffer: C::vec_from_parts(VecHeader { capacity, length }, data, Alloc::default()),
-//         }
-//     }
-// }
+#[cfg(feature = "alloc")]
+impl<T, C> From<alloc::vec::Vec<T>> for Vec<T, C>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: alloc::vec::Vec<T>) -> Self {
+        let capacity = vec.capacity();
+        let length = vec.len();
+        let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
+        unsafe { Self::from_parts(data, length, capacity, Global) }
+    }
+}
 
-// #[cfg(feature = "alloc")]
-// impl<T, C> From<Vec<T, C>> for alloc::vec::Vec<T>
-// where
-//     C: VecConfigAllocParts<T, Alloc = Alloc, Index = usize>,
-// {
-//     fn from(vec: Vec<T, C>) -> Self {
-//         let mut buffer = ManuallyDrop::new(vec.into_inner());
-//         let capacity = buffer.capacity();
-//         let length = buffer.length();
-//         let data = buffer.data_ptr_mut();
-//         unsafe { alloc::vec::Vec::from_raw_parts(data, length, capacity) }
-//     }
-// }
+#[cfg(feature = "alloc")]
+impl<T, C> From<Vec<T, C>> for alloc::vec::Vec<T>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: Vec<T, C>) -> Self {
+        let mut buffer = ManuallyDrop::new(vec.into_inner());
+        let capacity = buffer.capacity();
+        let length = buffer.length();
+        let data = buffer.data_ptr_mut();
+        unsafe { alloc::vec::Vec::from_raw_parts(data, length, capacity) }
+    }
+}
 
 // #[cfg(feature = "alloc")]
 // impl<'b, T: Clone, S> From<alloc::borrow::Cow<'b, [T]>> for Vec<T, S>
@@ -959,30 +1002,35 @@ where
 // }
 
 impl<T: Clone, C: VecConfigNew<T>> From<&[T]> for Vec<T, C> {
+    #[inline]
     fn from(data: &[T]) -> Self {
         Self::from_slice(data)
     }
 }
 
 impl<T: Clone, C: VecConfigNew<T>> From<&mut [T]> for Vec<T, C> {
+    #[inline]
     fn from(data: &mut [T]) -> Self {
         Self::from_slice(data)
     }
 }
 
 impl<T: Clone, C: VecConfigNew<T>, const N: usize> From<&[T; N]> for Vec<T, C> {
+    #[inline]
     fn from(data: &[T; N]) -> Self {
         Self::from_slice(data)
     }
 }
 
 impl<T: Clone, C: VecConfigNew<T>, const N: usize> From<&mut [T; N]> for Vec<T, C> {
+    #[inline]
     fn from(data: &mut [T; N]) -> Self {
         Self::from_slice(data)
     }
 }
 
 impl<T, C: VecConfigNew<T>, const N: usize> From<[T; N]> for Vec<T, C> {
+    #[inline]
     fn from(data: [T; N]) -> Self {
         Self::from_iter(data)
     }
@@ -992,6 +1040,7 @@ impl<T, C: VecConfig> IntoIterator for Vec<T, C> {
     type Item = T;
     type IntoIter = IntoIter<C::Buffer<T>>;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         IntoIter::new(self.into_inner())
     }
@@ -1001,6 +1050,7 @@ impl<'a, T, C: VecConfig> IntoIterator for &'a Vec<T, C> {
     type Item = &'a T;
     type IntoIter = <&'a [T] as IntoIterator>::IntoIter;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.as_slice().into_iter()
     }
@@ -1010,6 +1060,7 @@ impl<'a, T, C: VecConfig> IntoIterator for &'a mut Vec<T, C> {
     type Item = &'a mut T;
     type IntoIter = <&'a mut [T] as IntoIterator>::IntoIter;
 
+    #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.as_mut_slice().into_iter()
     }
@@ -1021,6 +1072,7 @@ where
     C2: VecConfig,
     T1: PartialEq<T2>,
 {
+    #[inline]
     fn eq(&self, other: &Vec<T2, C2>) -> bool {
         (&**self).eq(&**other)
     }
@@ -1033,6 +1085,7 @@ where
     T1: PartialEq<T2>,
     C1: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &&[T2]) -> bool {
         (&**self).eq(*other)
     }
@@ -1043,6 +1096,7 @@ where
     T1: PartialEq<T2>,
     C1: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &&mut [T2]) -> bool {
         (&**self).eq(*other)
     }
@@ -1053,6 +1107,7 @@ where
     T1: PartialEq<T2>,
     C1: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &[T2]) -> bool {
         (&**self).eq(other)
     }
@@ -1063,6 +1118,7 @@ where
     T1: PartialEq<T2>,
     C1: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &&[T2; N]) -> bool {
         (&**self).eq(&other[..])
     }
@@ -1073,6 +1129,7 @@ where
     T1: PartialEq<T2>,
     C1: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &&mut [T2; N]) -> bool {
         (&**self).eq(&other[..])
     }
@@ -1083,6 +1140,7 @@ where
     T1: PartialEq<T2>,
     C1: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &[T2; N]) -> bool {
         (&**self).eq(&other[..])
     }
@@ -1093,6 +1151,7 @@ where
     T2: PartialEq<T1>,
     C2: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &Vec<T2, C2>) -> bool {
         other.eq(self)
     }
@@ -1103,6 +1162,7 @@ where
     T2: PartialEq<T1>,
     C2: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &Vec<T2, C2>) -> bool {
         other.eq(self)
     }
@@ -1113,6 +1173,7 @@ where
     T2: PartialEq<T1>,
     C2: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &Vec<T2, C2>) -> bool {
         other.eq(self)
     }
@@ -1123,6 +1184,7 @@ where
     T2: PartialEq<T1>,
     C2: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &Vec<T2, C2>) -> bool {
         other.eq(self)
     }
@@ -1134,6 +1196,7 @@ where
     B: PartialEq<A>,
     C: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &alloc::vec::Vec<A>) -> bool {
         other.eq(self)
     }
@@ -1145,6 +1208,7 @@ where
     B: PartialEq<A>,
     C: VecConfig,
 {
+    #[inline]
     fn eq(&self, other: &Vec<B, C>) -> bool {
         other.eq(self)
     }
@@ -1161,7 +1225,7 @@ where
 // leak
 
 /// ```compile_fail,E0597
-/// use flex_vec::{byte_storage, Vec};
+/// use flex_vec::{byte_storage, vec::Vec};
 ///
 /// fn run<F: FnOnce() -> () + 'static>(f: F) { f() }
 ///

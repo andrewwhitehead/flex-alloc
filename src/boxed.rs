@@ -7,21 +7,12 @@ use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::{self, NonNull};
-use core::slice;
 use core::str;
 
 use crate::error::StorageError;
 use crate::storage::{Global, RawAlloc, RawAllocIn, RawAllocNew};
-
-// #[cfg(feature = "zeroize")]
-// use zeroize::ZeroizeOnDrop;
-
-// #[cfg(feature = "alloc")]
-// pub type AllocBox<T> = Box<T, AllocGlobal>;
-
-// pub type FlexBox<'b, T> = Box<T, Flex<'b>>;
-
-// pub type RefBox<'b, T> = Box<T, Fixed<'b>>;
+use crate::vec::insert::Inserter;
+use crate::vec::Vec;
 
 pub struct Box<T: ?Sized, A: RawAlloc = Global> {
     data: NonNull<T>,
@@ -29,15 +20,25 @@ pub struct Box<T: ?Sized, A: RawAlloc = Global> {
 }
 
 impl<T: ?Sized, A: RawAlloc> Box<T, A> {
-    #[inline]
-    pub unsafe fn from_parts(data: NonNull<T>, alloc: A) -> Self {
+    pub(crate) unsafe fn from_parts(data: NonNull<T>, alloc: A) -> Self {
         Self { data, alloc }
     }
 
     #[inline]
-    pub fn into_parts(boxed: Self) -> (NonNull<T>, A) {
-        let boxed = ManuallyDrop::new(boxed);
+    pub(crate) fn into_parts(self) -> (NonNull<T>, A) {
+        let boxed = ManuallyDrop::new(self);
         (boxed.data, unsafe { ptr::read(&boxed.alloc) })
+    }
+
+    #[inline]
+    pub unsafe fn from_raw_in(data: *mut T, alloc: A) -> Self {
+        Self::from_parts(NonNull::new_unchecked(data), alloc)
+    }
+
+    #[inline]
+    pub fn into_raw_with_allocator(self) -> (*mut T, A) {
+        let (data, alloc) = self.into_parts();
+        (data.as_ptr(), alloc)
     }
 
     #[inline]
@@ -48,6 +49,7 @@ impl<T: ?Sized, A: RawAlloc> Box<T, A> {
 }
 
 impl<T, A: RawAlloc> Box<T, A> {
+    #[inline]
     pub fn new_uninit_in<I>(alloc_in: I) -> Box<MaybeUninit<T>, A>
     where
         I: RawAllocIn<RawAlloc = A>,
@@ -58,6 +60,7 @@ impl<T, A: RawAlloc> Box<T, A> {
         }
     }
 
+    #[inline]
     pub fn new_in<I>(value: T, alloc_in: I) -> Self
     where
         I: RawAllocIn<RawAlloc = A>,
@@ -66,6 +69,7 @@ impl<T, A: RawAlloc> Box<T, A> {
         Box::write(boxed, value)
     }
 
+    #[inline]
     pub fn try_new_in<I>(value: T, alloc_in: I) -> Result<Self, StorageError>
     where
         I: RawAllocIn<RawAlloc = A>,
@@ -82,15 +86,18 @@ impl<T, A: RawAlloc> Box<T, A> {
         Ok(unsafe { Box::from_parts(data.cast(), alloc) })
     }
 
+    #[inline]
     pub fn into_inner(boxed: Self) -> T {
         unsafe { Box::transmute::<MaybeUninit<T>>(boxed).as_ptr().read() }
     }
 
+    #[inline]
     pub fn into_boxed_slice(boxed: Self) -> Box<[T], A> {
         let (data, alloc) = Self::into_parts(boxed);
         unsafe { Box::slice_from_parts(data, alloc, 1) }
     }
 
+    #[inline]
     pub fn leak<'a>(boxed: Self) -> &'a mut T
     where
         A: 'a,
@@ -99,10 +106,12 @@ impl<T, A: RawAlloc> Box<T, A> {
         unsafe { data.as_mut() }
     }
 
+    #[inline]
     pub fn into_pin(boxed: Self) -> Pin<Self> {
         unsafe { Pin::new_unchecked(boxed) }
     }
 
+    #[inline]
     pub fn pin_in<I>(value: T, alloc_in: I) -> Pin<Self>
     where
         I: RawAllocIn<RawAlloc = A>,
@@ -112,22 +121,27 @@ impl<T, A: RawAlloc> Box<T, A> {
 }
 
 impl<T, A: RawAllocNew> Box<T, A> {
+    #[inline]
     pub fn new(value: T) -> Self {
         Self::new_in(value, A::NEW)
     }
 
+    #[inline]
     pub fn new_uninit() -> Box<MaybeUninit<T>, A> {
         Self::new_uninit_in(A::NEW)
     }
 
+    #[inline]
     pub fn try_new(value: T) -> Result<Self, StorageError> {
         Self::try_new_in(value, A::NEW)
     }
 
+    #[inline]
     pub fn try_new_uninit() -> Result<Box<MaybeUninit<T>, A>, StorageError> {
         Self::try_new_uninit_in(A::NEW)
     }
 
+    #[inline]
     pub fn pin(value: T) -> Pin<Self> {
         Pin::from(Self::new(value))
     }
@@ -135,20 +149,14 @@ impl<T, A: RawAllocNew> Box<T, A> {
 
 impl<T, A: RawAlloc> Box<[T], A> {
     #[inline]
-    pub unsafe fn slice_from_parts(data: NonNull<T>, alloc: A, length: usize) -> Self {
+    pub(crate) unsafe fn slice_from_parts(data: NonNull<T>, alloc: A, length: usize) -> Self {
         let data = ptr::slice_from_raw_parts_mut(data.as_ptr().cast(), length);
         Self::from_parts(NonNull::new_unchecked(data), alloc)
-    }
-
-    #[inline]
-    pub fn slice_into_parts(self) -> (NonNull<T>, A, usize) {
-        let length = self.len();
-        let (data, alloc) = Self::into_parts(self);
-        (data.cast(), alloc, length)
     }
 }
 
 impl<T, A: RawAlloc> Box<[T], A> {
+    #[inline]
     pub fn new_uninit_slice_in<I>(length: usize, alloc_in: I) -> Box<[MaybeUninit<T>], A>
     where
         I: RawAllocIn<RawAlloc = A>,
@@ -173,14 +181,17 @@ impl<T, A: RawAlloc> Box<[T], A> {
 }
 
 impl<T, A: RawAllocNew> Box<[T], A> {
+    #[inline]
     pub fn new_uninit_slice(length: usize) -> Box<[MaybeUninit<T>], A> {
         Self::new_uninit_slice_in(length, A::NEW)
     }
 
+    #[inline]
     pub fn try_new_uninit_slice(length: usize) -> Result<Box<[MaybeUninit<T>], A>, StorageError> {
         Self::try_new_uninit_slice_in(length, A::NEW)
     }
 
+    #[inline]
     fn copy_slice(data: &[T]) -> Self
     where
         T: Copy,
@@ -196,21 +207,19 @@ impl<T, A: RawAllocNew> Box<[T], A> {
 
 impl<A: RawAlloc> Box<str, A> {
     pub fn from_utf8(boxed: Box<[u8], A>) -> Result<Self, str::Utf8Error> {
-        let (ptr, storage, length) = boxed.slice_into_parts();
+        let (ptr, alloc) = boxed.into_raw_with_allocator();
         unsafe {
-            let data = slice::from_raw_parts_mut(ptr.as_ptr(), length);
-            let strval = str::from_utf8_mut(data)?;
+            let strval = str::from_utf8_mut(&mut *ptr)?;
             let ptr = NonNull::new_unchecked(strval);
-            Ok(Self::from_parts(ptr, storage))
+            Ok(Self::from_parts(ptr, alloc))
         }
     }
 
     pub unsafe fn from_utf8_unchecked(boxed: Box<[u8], A>) -> Self {
-        let (ptr, storage, length) = boxed.slice_into_parts();
-        let data = slice::from_raw_parts_mut(ptr.as_ptr(), length);
-        let strval = str::from_utf8_unchecked_mut(data);
+        let (ptr, alloc) = boxed.into_raw_with_allocator();
+        let strval = str::from_utf8_unchecked_mut(&mut *ptr);
         let ptr = NonNull::new_unchecked(strval);
-        Self::from_parts(ptr, storage)
+        Self::from_parts(ptr, alloc)
     }
 }
 
@@ -229,13 +238,25 @@ impl<T, A: RawAlloc> Box<MaybeUninit<T>, A> {
 
 impl<T, A: RawAlloc> Box<[MaybeUninit<T>], A> {
     #[inline]
+    fn write_slice(&mut self, data: &[T])
+    where
+        T: Clone,
+    {
+        let mut insert = Inserter::for_mut_slice(&mut *self);
+        insert.extend_from_slice(data);
+        insert.complete();
+    }
+
+    #[inline]
     pub unsafe fn assume_init(self) -> Box<[T], A> {
-        let (ptr, storage, length) = self.slice_into_parts();
-        Box::slice_from_parts(ptr.cast(), storage, length)
+        let length = self.len();
+        let (data, alloc) = Self::into_parts(self);
+        Box::slice_from_parts(data.cast(), alloc, length)
     }
 }
 
 impl<'a, A: RawAlloc + 'a> Box<dyn Any + 'a, A> {
+    #[inline]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
         if self.is::<T>() {
             Ok(unsafe { Box::transmute(self) })
@@ -246,6 +267,7 @@ impl<'a, A: RawAlloc + 'a> Box<dyn Any + 'a, A> {
 }
 
 impl<'a, A: RawAlloc + 'a> Box<dyn Any + Send + 'a, A> {
+    #[inline]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
         if self.is::<T>() {
             unsafe { Ok(Box::transmute(self)) }
@@ -256,6 +278,7 @@ impl<'a, A: RawAlloc + 'a> Box<dyn Any + Send + 'a, A> {
 }
 
 impl<'a, A: RawAlloc + 'a> Box<dyn Any + Send + Sync + 'a, A> {
+    #[inline]
     pub fn downcast<T: Any>(self) -> Result<Box<T, A>, Self> {
         if self.is::<T>() {
             unsafe { Ok(Box::transmute(self)) }
@@ -266,24 +289,28 @@ impl<'a, A: RawAlloc + 'a> Box<dyn Any + Send + Sync + 'a, A> {
 }
 
 impl<T: ?Sized, A: RawAlloc> AsRef<T> for Box<T, A> {
+    #[inline]
     fn as_ref(&self) -> &T {
         unsafe { self.data.as_ref() }
     }
 }
 
 impl<T: ?Sized, A: RawAlloc> AsMut<T> for Box<T, A> {
+    #[inline]
     fn as_mut(&mut self) -> &mut T {
         unsafe { self.data.as_mut() }
     }
 }
 
 impl<T: ?Sized, A: RawAlloc> Borrow<T> for Box<T, A> {
+    #[inline]
     fn borrow(&self) -> &T {
         unsafe { self.data.as_ref() }
     }
 }
 
 impl<T: ?Sized, A: RawAlloc> BorrowMut<T> for Box<T, A> {
+    #[inline]
     fn borrow_mut(&mut self) -> &mut T {
         unsafe { self.data.as_mut() }
     }
@@ -302,21 +329,22 @@ impl<'b, T: Clone, A: RawAlloc + Clone> Clone for Box<T, A> {
     }
 }
 
-// impl<'b, T: Clone, S: StorageSpawn> Clone for Box<[T], S> {
-//     fn clone(&self) -> Self {
-//         let mut vec = Vec::with_capacity_in(self.len(), Self::storage(self));
-//         vec.extend_from_slice(&*self);
-//         vec.into_boxed_slice()
-//     }
+impl<'b, T: Clone, A: RawAlloc + Clone> Clone for Box<[T], A> {
+    fn clone(&self) -> Self {
+        let data = &**self;
+        let mut boxed = Self::new_uninit_slice_in(data.len(), self.alloc.clone());
+        boxed.write_slice(data);
+        unsafe { boxed.assume_init() }
+    }
 
-//     fn clone_from(&mut self, source: &Self) {
-//         if self.len() == source.len() {
-//             self.clone_from_slice(&source);
-//         } else {
-//             *self = source.clone();
-//         }
-//     }
-// }
+    fn clone_from(&mut self, source: &Self) {
+        if self.len() == source.len() {
+            self.clone_from_slice(&source);
+        } else {
+            *self = source.clone();
+        }
+    }
+}
 
 impl<T: Default, A: RawAllocNew> Default for Box<T, A> {
     fn default() -> Box<T, A> {
@@ -325,12 +353,14 @@ impl<T: Default, A: RawAllocNew> Default for Box<T, A> {
 }
 
 impl<T, A: RawAllocNew> Default for Box<[T], A> {
+    #[inline]
     fn default() -> Box<[T], A> {
         unsafe { Box::slice_from_parts(NonNull::dangling(), A::NEW, 0) }
     }
 }
 
 impl<A: RawAllocNew> Default for Box<str, A> {
+    #[inline]
     fn default() -> Box<str, A> {
         unsafe { Box::from_utf8_unchecked(Box::<[u8], A>::default()) }
     }
@@ -351,12 +381,14 @@ impl<T: fmt::Display + ?Sized, A: RawAlloc> fmt::Display for Box<T, A> {
 impl<T: ?Sized, A: RawAlloc> Deref for Box<T, A> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         unsafe { self.data.as_ref() }
     }
 }
 
 impl<T: ?Sized, A: RawAlloc> DerefMut for Box<T, A> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { self.data.as_mut() }
     }
@@ -373,31 +405,38 @@ impl<T: ?Sized, A: RawAlloc> Drop for Box<T, A> {
 }
 
 impl<T, A: RawAllocNew> From<T> for Box<T, A> {
+    #[inline]
     fn from(value: T) -> Self {
         Self::new(value)
     }
 }
 
-// impl<T: Clone, S: StorageNew> From<&[T]> for Box<[T], S> {
-//     fn from(data: &[T]) -> Self {
-//         Vec::<T, S>::from_slice(data).into_boxed_slice()
-//     }
-// }
+impl<T: Clone, A: RawAllocNew> From<&[T]> for Box<[T], A> {
+    #[inline]
+    fn from(data: &[T]) -> Self {
+        let mut boxed = Self::new_uninit_slice(data.len());
+        boxed.write_slice(data);
+        unsafe { boxed.assume_init() }
+    }
+}
 
 impl<A: RawAllocNew> From<&str> for Box<str, A> {
+    #[inline]
     fn from(data: &str) -> Self {
         let boxed = Box::copy_slice(data.as_bytes());
         unsafe { Box::from_utf8_unchecked(boxed) }
     }
 }
 
-// impl<T, S: StorageSpawn> From<Vec<T, S>> for Box<[T], S> {
-//     fn from(vec: Vec<T, S>) -> Self {
-//         vec.into_boxed_slice()
-//     }
-// }
+impl<T, A: RawAlloc> From<Vec<T, A>> for Box<[T], A> {
+    #[inline]
+    fn from(vec: Vec<T, A>) -> Self {
+        vec.into_boxed_slice()
+    }
+}
 
 impl<T: ?Sized, A: RawAlloc> From<Box<T, A>> for Pin<Box<T, A>> {
+    #[inline]
     fn from(boxed: Box<T, A>) -> Self {
         unsafe { Pin::new_unchecked(boxed) }
     }
@@ -405,6 +444,7 @@ impl<T: ?Sized, A: RawAlloc> From<Box<T, A>> for Pin<Box<T, A>> {
 
 #[cfg(feature = "alloc")]
 impl<T: ?Sized> From<alloc::boxed::Box<T>> for Box<T, Global> {
+    #[inline]
     fn from(boxed: alloc::boxed::Box<T>) -> Self {
         let ptr = alloc::boxed::Box::into_raw(boxed);
         unsafe { Box::from_parts(NonNull::new_unchecked(ptr), Global) }
@@ -421,11 +461,13 @@ impl<T: ?Sized> From<alloc::boxed::Box<T>> for Box<T, Global> {
 //     }
 // }
 
-// impl<T, S: StorageNew> FromIterator<T> for Box<[T], S> {
-//     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-//         Vec::<T, S>::from_iter(iter).into_boxed_slice()
-//     }
-// }
+impl<T, A: RawAlloc + Default> FromIterator<T> for Box<[T], A> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut vec = Vec::new_in(A::default());
+        vec.extend(iter);
+        vec.into_boxed_slice()
+    }
+}
 
 impl<T: ?Sized + PartialEq, A: RawAlloc> PartialEq for Box<T, A> {
     #[inline]
@@ -452,13 +494,8 @@ impl<T: ?Sized + Ord, A: RawAlloc> Ord for Box<T, A> {
 
 impl<T: ?Sized, A: RawAlloc> Unpin for Box<T, A> {}
 
-// #[cfg(feature = "zeroize")]
-// impl<T: ?Sized, S: Storage + ZeroizeOnDrop> ZeroizeOnDrop for Box<T, ZeroizingStorage<S>> {}
-
-// from_raw?
-// from_raw_in?
-// into_raw?
-// into_raw_with_storage?
+// from_raw
+// into_raw
 // new_zeroed
 // new_zeroed_in
 // new_zeroed_slice

@@ -5,7 +5,9 @@ use core::ptr::NonNull;
 use crate::error::StorageError;
 use crate::index::{Grow, GrowDoubling, GrowExact, Index};
 use crate::storage::alloc::{AllocHandle, FatAllocHandle, ThinAllocHandle};
-use crate::storage::{Fixed, FixedBuffer, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn};
+use crate::storage::{
+    AllocHandleParts, Fixed, FixedBuffer, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn,
+};
 use crate::Thin;
 
 use super::buffer::{VecBuffer, VecBufferNew, VecBufferSpawn, VecData, VecHeader};
@@ -42,18 +44,51 @@ where
 {
     type Alloc = <C::Buffer<T> as AllocHandle>::Alloc;
 
+    #[inline]
     fn allocator(buf: &Self::Buffer<T>) -> &Self::Alloc {
         buf.allocator()
     }
 }
 
-pub trait VecConfigNew<T>: VecConfig {
+pub trait VecConfigAllocParts<T>: VecConfigAllocator<T> {
+    fn vec_from_parts(
+        data: NonNull<T>,
+        length: Self::Index,
+        capacity: Self::Index,
+        alloc: Self::Alloc,
+    ) -> Self::Buffer<T>;
+
+    fn vec_into_parts(buf: Self::Buffer<T>) -> (NonNull<T>, Self::Index, Self::Index, Self::Alloc);
+}
+
+impl<T, C: VecConfig> VecConfigAllocParts<T> for C
+where
+    C::Buffer<T>: AllocHandleParts<Meta = VecData<T, Self::Index>>,
+{
+    #[inline]
+    fn vec_from_parts(
+        data: NonNull<T>,
+        length: Self::Index,
+        capacity: Self::Index,
+        alloc: Self::Alloc,
+    ) -> Self::Buffer<T> {
+        C::Buffer::<T>::buffer_from_parts(VecHeader { capacity, length }, data, alloc)
+    }
+
+    #[inline]
+    fn vec_into_parts(buf: Self::Buffer<T>) -> (NonNull<T>, Self::Index, Self::Index, Self::Alloc) {
+        let (header, data, alloc) = buf.buffer_into_parts();
+        (data, header.length, header.capacity, alloc)
+    }
+}
+
+pub trait VecConfigNew<T>: VecConfigSpawn<T> {
     const NEW: Self::Buffer<T>;
 
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self::Buffer<T>, StorageError>;
 }
 
-impl<T, C: VecConfig> VecConfigNew<T> for C
+impl<T, C: VecConfigSpawn<T>> VecConfigNew<T> for C
 where
     Self::Buffer<T>: VecBufferNew,
 {
@@ -77,6 +112,7 @@ impl<T, C: VecConfig> VecConfigSpawn<T> for C
 where
     Self::Buffer<T>: VecBufferSpawn,
 {
+    #[inline]
     fn vec_try_spawn(
         buf: &Self::Buffer<T>,
         capacity: Self::Index,
@@ -124,6 +160,7 @@ pub trait VecNewIn<T> {
 impl<T, C: RawAllocIn> VecNewIn<T> for C {
     type Config = C::RawAlloc;
 
+    #[inline]
     fn vec_try_new_in(
         self,
         capacity: <Self::Config as VecConfig>::Index,
@@ -161,5 +198,41 @@ impl<'a, T, const N: usize> VecNewIn<T> for &'a mut [MaybeUninit<T>; N] {
             },
             unsafe { NonNull::new_unchecked(self.as_mut_ptr()).cast() },
         ))
+    }
+}
+
+impl<T, const N: usize> VecNewIn<T> for Inline<N> {
+    type Config = Inline<N>;
+
+    #[inline]
+    fn vec_try_new_in(
+        self,
+        capacity: <Self::Config as VecConfig>::Index,
+        exact: bool,
+    ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError> {
+        if capacity > N || (capacity < N && exact) {
+            return Err(StorageError::CapacityLimit);
+        }
+        Ok(InlineBuffer::new())
+    }
+}
+
+impl<T> VecNewIn<T> for Thin {
+    type Config = Thin;
+
+    #[inline]
+    fn vec_try_new_in(
+        self,
+        capacity: <Self::Config as VecConfig>::Index,
+        exact: bool,
+    ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError> {
+        <Self::Config as VecConfig>::Buffer::<T>::alloc_handle_in(
+            Global,
+            VecHeader {
+                capacity,
+                length: Index::ZERO,
+            },
+            exact,
+        )
     }
 }
