@@ -5,7 +5,7 @@ use core::mem::size_of;
 
 use criterion::{black_box, Criterion};
 
-use flex_vec::{aligned_byte_storage, array_storage, vec::Vec as FlexVec, Inline, Thin};
+use flex_alloc::{aligned_byte_storage, array_storage, vec::Vec as FlexVec, Inline, Thin};
 
 fn standard_compare(c: &mut Criterion) {
     const SMALL_COUNT: usize = 100;

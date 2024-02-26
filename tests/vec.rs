@@ -1,6 +1,6 @@
 use core::mem::ManuallyDrop;
 
-use flex_vec::{
+use flex_alloc::{
     aligned_byte_storage, array_storage, boxed::Box as FlexBox, byte_storage, storage::Global,
     vec::Vec as FlexVec, Inline, Thin,
 };

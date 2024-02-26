@@ -1,9 +1,9 @@
 [package]
-name = "flex-vec"
+name = "flex-alloc"
 version = "0.0.1"
 authors = ["Andrew Whitehead <cywolf@gmail.com>"]
 edition = "2021"
-description = "Flexible vectors"
+description = "Flexibly allocated data types"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/andrewwhitehead/flex-vec/"
