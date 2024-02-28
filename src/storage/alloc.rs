@@ -293,9 +293,9 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for FatAllocHandle<Meta, Al
     }
 }
 
-impl<Meta: AllocLayout> AllocHandleNew for FatAllocHandle<Meta, Global> {
+impl<Meta: AllocLayout, Alloc: RawAllocNew> AllocHandleNew for FatAllocHandle<Meta, Alloc> {
     const NEW: Self = Self::dangling(Meta::Header::EMPTY, Self::NEW_ALLOC);
-    const NEW_ALLOC: Self::Alloc = Global;
+    const NEW_ALLOC: Self::Alloc = Alloc::NEW;
 }
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandleParts for FatAllocHandle<Meta, Alloc> {

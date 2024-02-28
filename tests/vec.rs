@@ -10,6 +10,12 @@ const SLICE: &[usize] = &[1, 2, 3, 4, 5];
 
 #[cfg(feature = "alloc")]
 #[test]
+fn vec_default_global() {
+    let _ = FlexVec::<usize>::default();
+}
+
+#[cfg(feature = "alloc")]
+#[test]
 fn vec_with_capacity_global() {
     let _ = FlexVec::<usize>::with_capacity(10);
 }

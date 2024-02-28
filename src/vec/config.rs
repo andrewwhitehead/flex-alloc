@@ -88,13 +88,13 @@ where
     }
 }
 
-pub trait VecConfigNew<T>: VecConfigSpawn<T> {
+pub trait VecConfigNew<T>: VecConfig {
     const NEW: Self::Buffer<T>;
 
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self::Buffer<T>, StorageError>;
 }
 
-impl<T, C: VecConfigSpawn<T>> VecConfigNew<T> for C
+impl<T, C: VecConfig> VecConfigNew<T> for C
 where
     Self::Buffer<T>: VecBufferNew,
 {

@@ -21,6 +21,7 @@ pub use self::{drain::Drain, into_iter::IntoIter, splice::Splice};
 pub mod buffer;
 pub mod config;
 
+mod cow;
 mod drain;
 pub(crate) mod insert;
 mod into_iter;
@@ -132,6 +133,32 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(Self {
             buffer: A::vec_try_new_in(alloc_in, capacity, false)?,
         })
+    }
+
+    pub fn from_slice_in<A>(data: &[T], alloc_in: A) -> Self
+    where
+        T: Clone,
+        A: VecNewIn<T, Config = C>,
+    {
+        let Some(len) = C::Index::try_from_usize(data.len()) else {
+            index_panic();
+        };
+        let mut vec = Self::with_capacity_in(len, alloc_in);
+        vec.extend_from_slice(data);
+        vec
+    }
+
+    pub fn try_from_slice_in<A>(data: &[T], alloc_in: A) -> Result<Self, StorageError>
+    where
+        T: Clone,
+        A: VecNewIn<T, Config = C>,
+    {
+        let Some(len) = C::Index::try_from_usize(data.len()) else {
+            return Err(StorageError::CapacityLimit);
+        };
+        let mut vec = Self::try_with_capacity_in(len, alloc_in)?;
+        vec.extend_from_slice(data);
+        Ok(vec)
     }
 }
 
@@ -832,15 +859,10 @@ impl<T: Clone, C: VecConfigSpawn<T>> Clone for Vec<T, C> {
     }
 }
 
-impl<T, C: VecConfig> Default for Vec<T, C>
-where
-    C::Buffer<T>: Default,
-{
+impl<T, C: VecConfigNew<T>> Default for Vec<T, C> {
     #[inline]
     fn default() -> Self {
-        Self {
-            buffer: C::Buffer::default(),
-        }
+        Self::new()
     }
 }
 

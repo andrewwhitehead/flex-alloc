@@ -128,7 +128,7 @@ where
     }
 }
 
-pub trait VecBufferNew: VecBufferSpawn {
+pub trait VecBufferNew: VecBuffer {
     const NEW: Self;
 
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
@@ -136,7 +136,7 @@ pub trait VecBufferNew: VecBufferSpawn {
 
 impl<B> VecBufferNew for B
 where
-    B: VecBufferSpawn + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
+    B: VecBuffer + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
 {
     const NEW: Self = Self::NEW;
 

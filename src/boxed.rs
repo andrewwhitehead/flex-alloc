@@ -36,8 +36,14 @@ impl<T: ?Sized, A: RawAlloc> Box<T, A> {
     }
 
     #[inline]
-    pub fn into_raw_with_allocator(self) -> (*mut T, A) {
-        let (data, alloc) = self.into_parts();
+    pub fn into_raw(boxed: Self) -> *mut T {
+        let (data, _alloc) = boxed.into_parts();
+        data.as_ptr()
+    }
+
+    #[inline]
+    pub fn into_raw_with_allocator(boxed: Self) -> (*mut T, A) {
+        let (data, alloc) = boxed.into_parts();
         (data.as_ptr(), alloc)
     }
 
@@ -132,6 +138,11 @@ impl<T, A: RawAllocNew> Box<T, A> {
     }
 
     #[inline]
+    pub unsafe fn from_raw(data: *mut T) -> Self {
+        Self::from_parts(NonNull::new_unchecked(data), A::NEW)
+    }
+
+    #[inline]
     pub fn try_new(value: T) -> Result<Self, StorageError> {
         Self::try_new_in(value, A::NEW)
     }
@@ -207,7 +218,7 @@ impl<T, A: RawAllocNew> Box<[T], A> {
 
 impl<A: RawAlloc> Box<str, A> {
     pub fn from_utf8(boxed: Box<[u8], A>) -> Result<Self, str::Utf8Error> {
-        let (ptr, alloc) = boxed.into_raw_with_allocator();
+        let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
         unsafe {
             let strval = str::from_utf8_mut(&mut *ptr)?;
             let ptr = NonNull::new_unchecked(strval);
@@ -216,7 +227,7 @@ impl<A: RawAlloc> Box<str, A> {
     }
 
     pub unsafe fn from_utf8_unchecked(boxed: Box<[u8], A>) -> Self {
-        let (ptr, alloc) = boxed.into_raw_with_allocator();
+        let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
         let strval = str::from_utf8_unchecked_mut(&mut *ptr);
         let ptr = NonNull::new_unchecked(strval);
         Self::from_parts(ptr, alloc)
@@ -494,8 +505,6 @@ impl<T: ?Sized + Ord, A: RawAlloc> Ord for Box<T, A> {
 
 impl<T: ?Sized, A: RawAlloc> Unpin for Box<T, A> {}
 
-// from_raw
-// into_raw
 // new_zeroed
 // new_zeroed_in
 // new_zeroed_slice
