@@ -150,13 +150,13 @@ pub trait AllocHandleNew: AllocHandle {
 }
 
 pub trait AllocHandleParts: AllocHandle {
-    fn buffer_from_parts(
+    fn handle_from_parts(
         header: <Self::Meta as AllocLayout>::Header,
         data: NonNull<<Self::Meta as AllocLayout>::Data>,
         alloc: Self::Alloc,
     ) -> Self;
 
-    fn buffer_into_parts(
+    fn handle_into_parts(
         self,
     ) -> (
         <Self::Meta as AllocLayout>::Header,
@@ -250,12 +250,12 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for FatAllocHandle<Meta, Al
         A: RawAllocIn<RawAlloc = Self::Alloc>,
     {
         let mut layout = Meta::layout(&header)?;
-        let (data, alloc) = alloc_in.try_alloc_in(layout)?;
-        if !exact && layout.size() != data.len() {
-            layout = unsafe { Layout::from_size_align_unchecked(data.len(), layout.align()) };
+        let (ptr, alloc) = alloc_in.try_alloc_in(layout)?;
+        if !exact && layout.size() != ptr.len() {
+            layout = unsafe { Layout::from_size_align_unchecked(ptr.len(), layout.align()) };
             Meta::update_header(&mut header, layout);
         }
-        Ok(Self::new(header, data.cast(), alloc))
+        Ok(Self::new(header, ptr.cast(), alloc))
     }
 
     #[inline]
@@ -272,7 +272,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for FatAllocHandle<Meta, Al
             }
         } else {
             let new_layout = Meta::layout(&new_header)?;
-            let data = if self.is_dangling() {
+            let ptr = if self.is_dangling() {
                 self.alloc.try_alloc(new_layout)?
             } else {
                 let old_layout: Layout = Meta::layout(&self.header)?;
@@ -281,12 +281,12 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for FatAllocHandle<Meta, Al
                         .try_resize(self.data.cast(), old_layout, new_layout)
                 }?
             };
-            if !exact && new_layout.size() != data.len() {
+            if !exact && new_layout.size() != ptr.len() {
                 let layout =
-                    unsafe { Layout::from_size_align_unchecked(data.len(), new_layout.align()) };
+                    unsafe { Layout::from_size_align_unchecked(ptr.len(), new_layout.align()) };
                 Meta::update_header(&mut new_header, layout);
             }
-            self.data = data.cast();
+            self.data = ptr.cast();
         }
         self.header = new_header;
         Ok(())
@@ -300,7 +300,7 @@ impl<Meta: AllocLayout> AllocHandleNew for FatAllocHandle<Meta, Global> {
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandleParts for FatAllocHandle<Meta, Alloc> {
     #[inline]
-    fn buffer_from_parts(
+    fn handle_from_parts(
         header: <Self::Meta as AllocLayout>::Header,
         data: NonNull<<Self::Meta as AllocLayout>::Data>,
         alloc: Self::Alloc,
@@ -313,7 +313,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandleParts for FatAllocHandle<Met
     }
 
     #[inline]
-    fn buffer_into_parts(
+    fn handle_into_parts(
         self,
     ) -> (
         <Self::Meta as AllocLayout>::Header,
@@ -408,6 +408,13 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> ThinAllocHandle<Meta, Alloc> {
             }
         }
     }
+
+    #[inline]
+    fn update_header(ptr: NonNull<[u8]>, header: &mut Meta::Header, data_layout: Layout) {
+        let data_len = ptr.len() - ThinPtr::<Meta>::DATA_OFFSET;
+        let layout = unsafe { Layout::from_size_align_unchecked(data_len, data_layout.align()) };
+        Meta::update_header(header, layout);
+    }
 }
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> RawBuffer for ThinAllocHandle<Meta, Alloc> {
@@ -462,19 +469,19 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
         let alloc_layout = Self::combined_layout(data_layout)?;
         let (ptr, alloc) = alloc_in.try_alloc_in(alloc_layout)?;
         if ptr.len() < ThinPtr::<Meta>::DATA_OFFSET {
-            if ptr.len() == 0 && alloc_layout.size() == 0 {
-                return Ok(ThinAllocHandle::dangling(alloc));
-            }
             unsafe { alloc.release(ptr.cast(), alloc_layout) };
-            return Err(StorageError::CapacityLimit);
+            return if ptr.len() == 0 && data_layout.size() == 0 {
+                Ok(ThinAllocHandle::dangling(alloc))
+            } else {
+                Err(StorageError::CapacityLimit)
+            };
         }
         if !exact && alloc_layout.size() != ptr.len() {
-            let data_len = ptr.len() - ThinPtr::<Meta>::DATA_OFFSET;
-            let layout =
-                unsafe { Layout::from_size_align_unchecked(data_len, data_layout.align()) };
-            Meta::update_header(&mut header, layout);
+            Self::update_header(ptr, &mut header, data_layout);
         }
-        Ok(Self::new(ThinPtr::from_alloc(ptr), alloc))
+        let data = ThinPtr::<Meta>::from_alloc(ptr);
+        unsafe { data.header_ptr().write(header) };
+        Ok(Self::new(data, alloc))
     }
 
     #[inline]
@@ -483,45 +490,33 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
         mut new_header: Meta::Header,
         exact: bool,
     ) -> Result<(), StorageError> {
-        if new_header.is_empty() {
-            if !self.data.is_dangling() {
-                let layout =
-                    Meta::layout(unsafe { self.header() }).and_then(Self::combined_layout)?;
-                unsafe { self.alloc.release(self.data.to_alloc(), layout) };
-                self.data = ThinPtr::dangling();
-            }
+        let data_layout = Meta::layout(&new_header)?;
+        let alloc_layout = Self::combined_layout(data_layout)?;
+        let ptr = if self.data.is_dangling() {
+            self.alloc.try_alloc(alloc_layout)?
         } else {
-            let data_layout = Meta::layout(&new_header)?;
-            let alloc_layout = Self::combined_layout(data_layout)?;
-            let ptr = if self.data.is_dangling() {
-                self.alloc.try_alloc(alloc_layout)?
+            let old_layout =
+                Meta::layout(unsafe { self.header() }).and_then(Self::combined_layout)?;
+            unsafe {
+                self.alloc
+                    .try_resize(self.data.to_alloc(), old_layout, alloc_layout)
+            }?
+        };
+        if ptr.len() < ThinPtr::<Meta>::DATA_OFFSET {
+            unsafe { self.alloc.release(ptr.cast(), alloc_layout) };
+            return if ptr.len() == 0 && data_layout.size() == 0 {
+                self.data = ThinPtr::dangling();
+                Ok(())
             } else {
-                let old_layout =
-                    Meta::layout(unsafe { self.header() }).and_then(Self::combined_layout)?;
-                unsafe {
-                    self.alloc
-                        .try_resize(self.data.to_alloc(), old_layout, alloc_layout)?
-                }
+                Err(StorageError::CapacityLimit)
             };
-            if ptr.len() == 0 {
-                return if alloc_layout.size() == 0 {
-                    self.data = ThinPtr::dangling();
-                    Ok(())
-                } else {
-                    Err(StorageError::CapacityLimit)
-                };
-            } else if ptr.len() < ThinPtr::<Meta>::DATA_OFFSET {
-                return Err(StorageError::CapacityLimit);
-            }
-            if !exact && alloc_layout.size() != ptr.len() {
-                let data_len = ptr.len() - ThinPtr::<Meta>::DATA_OFFSET;
-                let layout =
-                    unsafe { Layout::from_size_align_unchecked(data_len, data_layout.align()) };
-                Meta::update_header(&mut new_header, layout);
-            }
-            self.data = ThinPtr::from_alloc(ptr);
-            *unsafe { self.header_mut() } = new_header;
         }
+        if !exact && alloc_layout.size() != ptr.len() {
+            Self::update_header(ptr, &mut new_header, data_layout);
+        }
+        let data = ThinPtr::<Meta>::from_alloc(ptr);
+        unsafe { data.header_ptr().write(new_header) };
+        self.data = data;
         Ok(())
     }
 }
@@ -547,7 +542,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> Drop for ThinAllocHandle<Meta, Alloc> {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Thin;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct FixedAlloc<'a>(PhantomData<&'a mut ()>);
 
 impl RawAlloc for FixedAlloc<'_> {
@@ -580,7 +575,7 @@ impl<'a, T, const N: usize> RawAllocIn for &'a mut ByteStorage<T, N> {
     #[inline]
     fn try_alloc_in(self, layout: Layout) -> Result<(NonNull<[u8]>, Self::RawAlloc), StorageError> {
         let ptr = layout_aligned_bytes(self.as_uninit_slice(), layout)?;
-        let alloc = FixedAlloc(PhantomData);
+        let alloc = FixedAlloc::default();
         Ok((ptr, alloc))
     }
 }

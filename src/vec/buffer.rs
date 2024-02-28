@@ -8,7 +8,7 @@ use crate::error::StorageError;
 use crate::index::Index;
 use crate::storage::alloc::{AllocHandle, AllocHandleNew};
 use crate::storage::utils::array_layout;
-use crate::storage::{AllocHeader, AllocLayout, FixedBuffer, InlineBuffer, RawBuffer};
+use crate::storage::{AllocHeader, AllocLayout, InlineBuffer, RawBuffer};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VecHeader<I: Index = usize> {
@@ -210,25 +210,5 @@ impl<'a, T, const N: usize> VecBufferSpawn for InlineBuffer<T, N> {
     #[inline]
     fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
         Self::vec_try_new(capacity, exact)
-    }
-}
-
-impl<'a, T, I: Index> VecBuffer for FixedBuffer<VecHeader<I>, T> {
-    type Data = T;
-    type Index = I;
-
-    #[inline]
-    fn capacity(&self) -> I {
-        self.header.capacity
-    }
-
-    #[inline]
-    fn length(&self) -> I {
-        self.header.length
-    }
-
-    #[inline]
-    unsafe fn set_length(&mut self, len: I) {
-        self.header.length = len;
     }
 }

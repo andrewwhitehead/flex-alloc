@@ -4,20 +4,22 @@ use core::ptr::NonNull;
 
 use crate::error::StorageError;
 use crate::index::{Grow, GrowDoubling, GrowExact, Index};
-use crate::storage::alloc::{AllocHandle, FatAllocHandle, ThinAllocHandle};
+use crate::storage::alloc::{AllocHandle, FatAllocHandle, FixedAlloc, ThinAllocHandle};
 use crate::storage::{
-    AllocHandleParts, Fixed, FixedBuffer, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn,
+    AllocHandleParts, Fixed, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn, RawAllocNew,
 };
 use crate::Thin;
 
 use super::buffer::{VecBuffer, VecBufferNew, VecBufferSpawn, VecData, VecHeader};
 
-pub trait VecConfigIndex {
-    type IndexBuffer<T, I: Index>: VecBuffer<Data = T, Index = I>;
+pub trait VecAlloc {
+    type RawAlloc: RawAlloc;
+    type AllocHandle<T, I: Index>: AllocHandle<Alloc = Self::RawAlloc, Meta = VecData<T, I>>;
 }
 
-impl<A: RawAlloc> VecConfigIndex for A {
-    type IndexBuffer<T, I: Index> = FatAllocHandle<VecData<T, I>, A>;
+impl<A: RawAlloc> VecAlloc for A {
+    type RawAlloc = A;
+    type AllocHandle<T, I: Index> = FatAllocHandle<VecData<T, I>, A>;
 }
 
 pub trait VecConfig {
@@ -26,21 +28,21 @@ pub trait VecConfig {
     type Index: Index;
 }
 
-impl<C: VecConfigIndex> VecConfig for C {
-    type Buffer<T> = C::IndexBuffer<T, Self::Index>;
+impl<C: VecAlloc> VecConfig for C {
+    type Buffer<T> = C::AllocHandle<T, Self::Index>;
     type Grow = GrowDoubling;
     type Index = usize;
 }
 
-pub trait VecConfigAllocator<T>: VecConfig {
+pub trait VecConfigAlloc<T>: VecConfig {
     type Alloc: RawAlloc;
 
     fn allocator(buf: &Self::Buffer<T>) -> &Self::Alloc;
 }
 
-impl<T, C: VecConfig> VecConfigAllocator<T> for C
+impl<T, C: VecConfig> VecConfigAlloc<T> for C
 where
-    C::Buffer<T>: AllocHandle,
+    C::Buffer<T>: AllocHandle<Meta = VecData<T, Self::Index>>,
 {
     type Alloc = <C::Buffer<T> as AllocHandle>::Alloc;
 
@@ -50,7 +52,7 @@ where
     }
 }
 
-pub trait VecConfigAllocParts<T>: VecConfigAllocator<T> {
+pub trait VecConfigAllocParts<T>: VecConfigAlloc<T> {
     fn vec_from_parts(
         data: NonNull<T>,
         length: Self::Index,
@@ -58,12 +60,14 @@ pub trait VecConfigAllocParts<T>: VecConfigAllocator<T> {
         alloc: Self::Alloc,
     ) -> Self::Buffer<T>;
 
-    fn vec_into_parts(buf: Self::Buffer<T>) -> (NonNull<T>, Self::Index, Self::Index, Self::Alloc);
+    fn vec_into_parts(
+        buffer: Self::Buffer<T>,
+    ) -> (NonNull<T>, Self::Index, Self::Index, Self::Alloc);
 }
 
-impl<T, C: VecConfig> VecConfigAllocParts<T> for C
+impl<T, C: VecConfigAlloc<T>> VecConfigAllocParts<T> for C
 where
-    C::Buffer<T>: AllocHandleParts<Meta = VecData<T, Self::Index>>,
+    C::Buffer<T>: AllocHandleParts<Alloc = Self::Alloc, Meta = VecData<T, Self::Index>>,
 {
     #[inline]
     fn vec_from_parts(
@@ -72,12 +76,14 @@ where
         capacity: Self::Index,
         alloc: Self::Alloc,
     ) -> Self::Buffer<T> {
-        C::Buffer::<T>::buffer_from_parts(VecHeader { capacity, length }, data, alloc)
+        Self::Buffer::<T>::handle_from_parts(VecHeader { capacity, length }, data, alloc)
     }
 
     #[inline]
-    fn vec_into_parts(buf: Self::Buffer<T>) -> (NonNull<T>, Self::Index, Self::Index, Self::Alloc) {
-        let (header, data, alloc) = buf.buffer_into_parts();
+    fn vec_into_parts(
+        buffer: Self::Buffer<T>,
+    ) -> (NonNull<T>, Self::Index, Self::Index, Self::Alloc) {
+        let (header, data, alloc) = buffer.handle_into_parts();
         (data, header.length, header.capacity, alloc)
     }
 }
@@ -123,18 +129,28 @@ where
 }
 
 #[derive(Debug, Default)]
-pub struct Custom<C, I: Index = usize, G: Grow = GrowExact>(PhantomData<(C, I, G)>);
+pub struct Custom<C: VecAlloc, I: Index = usize, G: Grow = GrowExact>(
+    C::RawAlloc,
+    PhantomData<(I, G)>,
+);
 
-impl<C: VecConfigIndex, I: Index, G: Grow> VecConfig for Custom<C, I, G> {
-    type Buffer<T> = C::IndexBuffer<T, Self::Index>;
+// FIXME add generic ConstDefault trait
+impl<C: RawAllocNew, I: Index, G: Grow> Custom<C, I, G> {
+    #[inline]
+    pub const fn new() -> Self {
+        Self(C::NEW, PhantomData)
+    }
+}
+
+impl<C: VecAlloc, I: Index, G: Grow> VecConfig for Custom<C, I, G> {
+    type Buffer<T> = C::AllocHandle<T, Self::Index>;
     type Grow = G;
     type Index = I;
 }
 
-impl<'a> VecConfig for Fixed<'a> {
-    type Buffer<T> = FixedBuffer<VecHeader<usize>, T>;
-    type Index = usize;
-    type Grow = GrowExact;
+impl<'a> VecAlloc for Fixed<'a> {
+    type RawAlloc = FixedAlloc<'a>;
+    type AllocHandle<T, I: Index> = FatAllocHandle<VecData<T, I>, Self::RawAlloc>;
 }
 
 impl<const N: usize> VecConfig for Inline<N> {
@@ -143,8 +159,9 @@ impl<const N: usize> VecConfig for Inline<N> {
     type Grow = GrowExact;
 }
 
-impl VecConfigIndex for Thin {
-    type IndexBuffer<T, I: Index> = ThinAllocHandle<VecData<T, I>, Global>;
+impl VecAlloc for Thin {
+    type RawAlloc = Global;
+    type AllocHandle<T, I: Index> = ThinAllocHandle<VecData<T, I>, Global>;
 }
 
 pub trait VecNewIn<T> {
@@ -157,6 +174,7 @@ pub trait VecNewIn<T> {
     ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError>;
 }
 
+// FIXME implement VecBufferNewIn trait so that Custom<C,I,G> can implement VecNewIn
 impl<T, C: RawAllocIn> VecNewIn<T> for C {
     type Config = C::RawAlloc;
 
@@ -177,9 +195,30 @@ impl<T, C: RawAllocIn> VecNewIn<T> for C {
     }
 }
 
+impl<T, C: VecAlloc, I: Index, G: Grow> VecNewIn<T> for Custom<C, I, G> {
+    type Config = Self;
+
+    #[inline]
+    fn vec_try_new_in(
+        self,
+        capacity: <Self::Config as VecConfig>::Index,
+        exact: bool,
+    ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError> {
+        C::AllocHandle::alloc_handle_in(
+            self.0,
+            VecHeader {
+                capacity,
+                length: Index::ZERO,
+            },
+            exact,
+        )
+    }
+}
+
 impl<'a, T, const N: usize> VecNewIn<T> for &'a mut [MaybeUninit<T>; N] {
     type Config = Fixed<'a>;
 
+    #[inline]
     fn vec_try_new_in(
         self,
         mut capacity: <Self::Config as VecConfig>::Index,
@@ -191,12 +230,13 @@ impl<'a, T, const N: usize> VecNewIn<T> for &'a mut [MaybeUninit<T>; N] {
         if !exact {
             capacity = N;
         }
-        Ok(FixedBuffer::new(
+        Ok(<Self::Config as VecConfig>::Buffer::<T>::handle_from_parts(
             VecHeader {
                 capacity,
-                length: 0,
+                length: Index::ZERO,
             },
-            unsafe { NonNull::new_unchecked(self.as_mut_ptr()).cast() },
+            unsafe { NonNull::new_unchecked(self.as_mut_ptr()) }.cast(),
+            FixedAlloc::default(),
         ))
     }
 }

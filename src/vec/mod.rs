@@ -12,7 +12,7 @@ use crate::storage::{Global, RawBuffer};
 
 use self::buffer::VecBuffer;
 use self::config::{
-    VecConfig, VecConfigAllocParts, VecConfigAllocator, VecConfigNew, VecConfigSpawn, VecNewIn,
+    VecConfig, VecConfigAlloc, VecConfigAllocParts, VecConfigNew, VecConfigSpawn, VecNewIn,
 };
 use self::insert::Inserter;
 
@@ -143,7 +143,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     }
 }
 
-impl<T, C: VecConfigAllocator<T>> Vec<T, C> {
+impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
     pub fn allocator(&self) -> &C::Alloc {
         C::allocator(&self.buffer)
     }

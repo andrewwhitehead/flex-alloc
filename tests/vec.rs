@@ -1,8 +1,9 @@
 use core::mem::ManuallyDrop;
+use std::mem::{size_of, size_of_val};
 
 use flex_alloc::{
     aligned_byte_storage, array_storage, boxed::Box as FlexBox, byte_storage, storage::Global,
-    vec::Vec as FlexVec, Inline, Thin,
+    vec::config::Custom, vec::Vec as FlexVec, Inline, Thin,
 };
 
 const SLICE: &[usize] = &[1, 2, 3, 4, 5];
@@ -50,6 +51,7 @@ fn vec_extend_new_thin() {
     assert!(v.capacity() >= SLICE.len());
     assert!(v.len() == SLICE.len());
     assert_eq!(v.as_slice(), SLICE);
+    assert!(size_of_val(&v) == size_of::<*const ()>());
 }
 
 #[test]
@@ -59,6 +61,12 @@ fn vec_extend_new_in_thin() {
     assert!(v.capacity() >= SLICE.len());
     assert!(v.len() == SLICE.len());
     assert_eq!(v.as_slice(), SLICE);
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn vec_with_capacity_thin() {
+    let _ = FlexVec::<usize, Thin>::with_capacity(10);
 }
 
 #[test]
@@ -216,12 +224,27 @@ fn vec_new_in_bytes_aligned() {
     assert_eq!(b, &[0, 7, 2, 3, 4, 5][..]);
 }
 
-// #[test]
-// fn vec_capacity_u8() {
-//     let mut b = FlexVec::<usize, Alloc<Global, u8>>::new();
-//     b.resize(255, 1);
-//     assert!(b.try_push(1).is_err());
-// }
+#[test]
+fn vec_custom_index_new() {
+    let mut v = FlexVec::<usize, Custom<Global, u8>>::new();
+    v.resize(255, 1);
+    assert!(v.try_push(1).is_err());
+}
+
+#[test]
+fn vec_custom_index_new_in() {
+    let mut v = FlexVec::new_in(Custom::<Global, u8>::new());
+    v.resize(255, 1);
+    assert!(v.try_push(1).is_err());
+}
+
+#[test]
+fn vec_custom_index_thin_new() {
+    let mut v = FlexVec::<usize, Custom<Thin, u8>>::new();
+    v.resize(255, 1);
+    assert!(v.try_push(1).is_err());
+    assert!(size_of_val(&v) == size_of::<*const ()>());
+}
 
 // #[test]
 // fn vec_inline_2() {

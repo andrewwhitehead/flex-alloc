@@ -1,7 +1,6 @@
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};
-use core::ptr::NonNull;
 
 pub(crate) mod alloc;
 
@@ -57,32 +56,6 @@ pub const fn aligned_byte_storage<T, const N: usize>() -> ByteStorage<T, N> {
 
 #[derive(Debug)]
 pub struct Fixed<'a>(PhantomData<&'a mut ()>);
-
-#[derive(Debug)]
-pub struct FixedBuffer<Header, Data> {
-    pub data: NonNull<Data>,
-    pub header: Header,
-}
-
-impl<Header, Data> FixedBuffer<Header, Data> {
-    pub const fn new(header: Header, data: NonNull<Data>) -> Self {
-        Self { header, data }
-    }
-}
-
-impl<Header, Data> RawBuffer for FixedBuffer<Header, Data> {
-    type RawData = Data;
-
-    #[inline]
-    fn data_ptr(&self) -> *const Data {
-        self.data.as_ptr()
-    }
-
-    #[inline]
-    fn data_ptr_mut(&mut self) -> *mut Data {
-        self.data.as_ptr()
-    }
-}
 
 #[derive(Debug)]
 pub struct Inline<const N: usize>;
