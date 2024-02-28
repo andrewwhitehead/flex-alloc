@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::NonNull;
@@ -12,7 +13,7 @@ use crate::Thin;
 
 use super::buffer::{VecBuffer, VecBufferNew, VecBufferSpawn, VecData, VecHeader};
 
-pub trait VecAlloc {
+pub trait VecAlloc: Debug {
     type RawAlloc: RawAlloc;
     type AllocHandle<T, I: Index>: AllocHandle<Alloc = Self::RawAlloc, Meta = VecData<T, I>>;
 }
@@ -22,7 +23,7 @@ impl<A: RawAlloc> VecAlloc for A {
     type AllocHandle<T, I: Index> = FatAllocHandle<VecData<T, I>, A>;
 }
 
-pub trait VecConfig {
+pub trait VecConfig: Debug {
     type Buffer<T>: VecBuffer<Data = T, Index = Self::Index>;
     type Grow: Grow;
     type Index: Index;
@@ -88,13 +89,13 @@ where
     }
 }
 
-pub trait VecConfigNew<T>: VecConfig {
+pub trait VecConfigNew<T>: VecConfigSpawn<T> {
     const NEW: Self::Buffer<T>;
 
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self::Buffer<T>, StorageError>;
 }
 
-impl<T, C: VecConfig> VecConfigNew<T> for C
+impl<T, C: VecConfigSpawn<T>> VecConfigNew<T> for C
 where
     Self::Buffer<T>: VecBufferNew,
 {
@@ -174,7 +175,6 @@ pub trait VecNewIn<T> {
     ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError>;
 }
 
-// FIXME implement VecBufferNewIn trait so that Custom<C,I,G> can implement VecNewIn
 impl<T, C: RawAllocIn> VecNewIn<T> for C {
     type Config = C::RawAlloc;
 
@@ -212,6 +212,35 @@ impl<T, C: VecAlloc, I: Index, G: Grow> VecNewIn<T> for Custom<C, I, G> {
             },
             exact,
         )
+    }
+}
+
+impl<'a, T> VecNewIn<T> for &'a mut [MaybeUninit<T>] {
+    type Config = Fixed<'a>;
+
+    #[inline]
+    fn vec_try_new_in(
+        self,
+        mut capacity: <Self::Config as VecConfig>::Index,
+        exact: bool,
+    ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError> {
+        if capacity.to_usize() > self.len() {
+            return Err(StorageError::CapacityLimit);
+        }
+        if !exact {
+            capacity = Index::from_usize(
+                self.len()
+                    .min(<Self::Config as VecConfig>::Index::MAX_USIZE),
+            );
+        }
+        Ok(<Self::Config as VecConfig>::Buffer::<T>::handle_from_parts(
+            VecHeader {
+                capacity,
+                length: Index::ZERO,
+            },
+            unsafe { NonNull::new_unchecked(self.as_mut_ptr()) }.cast(),
+            FixedAlloc::default(),
+        ))
     }
 }
 

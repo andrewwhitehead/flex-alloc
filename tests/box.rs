@@ -1,4 +1,7 @@
-use flex_alloc::{boxed::Box, byte_storage, storage::Global, StorageError};
+use flex_alloc::{boxed::Box, byte_storage, StorageError};
+
+#[cfg(feature = "alloc")]
+use flex_alloc::storage::Global;
 
 #[cfg(feature = "alloc")]
 #[test]
@@ -14,6 +17,7 @@ fn test_box_in_alloc() {
     assert_eq!(*b, 10u32);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn test_box_zst_in_alloc() {
     #[derive(Debug, PartialEq)]

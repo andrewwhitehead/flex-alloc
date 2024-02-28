@@ -1,18 +1,20 @@
 use core::alloc::Layout;
 use core::fmt;
 use core::marker::PhantomData;
-use core::mem::{align_of, offset_of, transmute, ManuallyDrop};
+use core::mem::{align_of, offset_of, ManuallyDrop};
 use core::ptr::{self, NonNull};
 
 #[cfg(feature = "alloc")]
 use alloc::alloc::{alloc as raw_alloc, dealloc as raw_dealloc};
+#[cfg(feature = "alloc")]
+use core::mem::transmute;
 
 use crate::error::StorageError;
 
 use super::utils::layout_aligned_bytes;
 use super::{ByteStorage, RawBuffer};
 
-pub trait RawAlloc {
+pub trait RawAlloc: fmt::Debug {
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError>;
 
     unsafe fn try_resize(
@@ -52,12 +54,13 @@ impl<A: RawAlloc> RawAllocIn for A {
     }
 }
 
-pub trait RawAllocNew: RawAlloc {
+pub trait RawAllocNew: RawAlloc + Clone + Copy {
     const NEW: Self;
 }
 
 // FIXME use alloc::alloc::Global when allocator_api enabled
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "alloc", derive(Default, Copy))]
 pub struct Global;
 
 #[cfg(feature = "alloc")]
@@ -84,6 +87,20 @@ impl RawAlloc for Global {
     }
 }
 
+#[cfg(not(feature = "alloc"))]
+// Stub implementation to allow Global as the default allocator type.
+// Because the type can't be created, errors will still be detected at compile time if used.
+impl RawAlloc for Global {
+    fn try_alloc(&self, _layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
+        unimplemented!();
+    }
+
+    unsafe fn release(&self, _ptr: NonNull<u8>, _layout: Layout) {
+        unimplemented!();
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl RawAllocNew for Global {
     const NEW: Self = Global;
 }
@@ -398,8 +415,8 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> ThinAllocHandle<Meta, Alloc> {
     }
 
     #[inline]
-    fn combined_layout(data_layout: Layout) -> Result<Layout, StorageError> {
-        if data_layout.size() == 0 {
+    fn combined_layout(data_layout: Layout, is_empty: bool) -> Result<Layout, StorageError> {
+        if data_layout.size() == 0 && is_empty {
             Ok(unsafe { Layout::from_size_align_unchecked(0, align_of::<Meta::Header>()) })
         } else {
             match Layout::new::<Meta::Header>().extend(data_layout) {
@@ -466,7 +483,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
         A: RawAllocIn<RawAlloc = Self::Alloc>,
     {
         let data_layout = Meta::layout(&header)?;
-        let alloc_layout = Self::combined_layout(data_layout)?;
+        let alloc_layout = Self::combined_layout(data_layout, header.is_empty())?;
         let (ptr, alloc) = alloc_in.try_alloc_in(alloc_layout)?;
         if ptr.len() < ThinPtr::<Meta>::DATA_OFFSET {
             unsafe { alloc.release(ptr.cast(), alloc_layout) };
@@ -491,12 +508,11 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
         exact: bool,
     ) -> Result<(), StorageError> {
         let data_layout = Meta::layout(&new_header)?;
-        let alloc_layout = Self::combined_layout(data_layout)?;
+        let alloc_layout = Self::combined_layout(data_layout, new_header.is_empty())?;
         let ptr = if self.data.is_dangling() {
             self.alloc.try_alloc(alloc_layout)?
         } else {
-            let old_layout =
-                Meta::layout(unsafe { self.header() }).and_then(Self::combined_layout)?;
+            let old_layout = Self::combined_layout(Meta::layout(unsafe { self.header() })?, false)?;
             unsafe {
                 self.alloc
                     .try_resize(self.data.to_alloc(), old_layout, alloc_layout)
@@ -521,16 +537,16 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
     }
 }
 
-impl<Meta: AllocLayout> AllocHandleNew for ThinAllocHandle<Meta, Global> {
+impl<Meta: AllocLayout, Alloc: RawAllocNew> AllocHandleNew for ThinAllocHandle<Meta, Alloc> {
     const NEW: Self = Self::dangling(Self::NEW_ALLOC);
-    const NEW_ALLOC: Self::Alloc = Global;
+    const NEW_ALLOC: Self::Alloc = Alloc::NEW;
 }
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> Drop for ThinAllocHandle<Meta, Alloc> {
     fn drop(&mut self) {
         if !self.data.is_dangling() {
             let layout = Meta::layout(unsafe { self.header() })
-                .and_then(Self::combined_layout)
+                .and_then(|layout| Self::combined_layout(layout, false))
                 .expect("error calculating layout");
             unsafe {
                 self.alloc.release(self.data.to_alloc(), layout);

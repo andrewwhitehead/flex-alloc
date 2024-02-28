@@ -14,7 +14,7 @@ pub mod boxed;
 
 pub(crate) mod error;
 
-pub(crate) mod index;
+pub mod index;
 
 pub mod storage;
 

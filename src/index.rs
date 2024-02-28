@@ -98,7 +98,7 @@ impl Index for usize {
     }
 }
 
-pub trait Grow {
+pub trait Grow: Debug {
     fn next_capacity<T, I: Index>(prev: I, minimum: I) -> I;
 }
 

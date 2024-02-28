@@ -47,16 +47,21 @@ impl<'a, T: Clone, A: RawAllocNew> FromIterator<T> for Cow<'a, [T], A> {
     }
 }
 
-#[cfg(feature = "alloc")]
-#[test]
-fn test_borrow_vec() {
-    use crate::storage::Global;
-    let mut b = Cow::<[u32], Global>::default();
-    assert!(b.is_owned());
-    b.to_mut().push(1);
-    assert_eq!(b.into_owned(), &[1]);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let b = Cow::<[u32], Global>::from(&[1, 2, 3]);
-    assert!(b.is_borrowed());
-    assert_eq!(b.into_owned(), &[1, 2, 3]);
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn cow_borrow_vec() {
+        use crate::storage::Global;
+        let mut b = Cow::<[u32], Global>::default();
+        assert!(b.is_owned());
+        b.to_mut().push(1);
+        assert_eq!(b.into_owned(), &[1]);
+
+        let b = Cow::<[u32], Global>::from(&[1, 2, 3]);
+        assert!(b.is_borrowed());
+        assert_eq!(b.into_owned(), &[1, 2, 3]);
+    }
 }

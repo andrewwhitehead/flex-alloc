@@ -83,11 +83,7 @@ pub trait VecBuffer: RawBuffer<RawData = Self::Data> {
         &mut *self.data_ptr_mut().add(index).cast()
     }
 
-    #[inline]
-    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
-        let _ = (capacity, exact);
-        Err(StorageError::Unsupported)
-    }
+    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError>;
 }
 
 impl<'a, B, T, I: Index> VecBuffer for B
@@ -128,7 +124,7 @@ where
     }
 }
 
-pub trait VecBufferNew: VecBuffer {
+pub trait VecBufferNew: VecBufferSpawn {
     const NEW: Self;
 
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
@@ -136,7 +132,7 @@ pub trait VecBufferNew: VecBuffer {
 
 impl<B> VecBufferNew for B
 where
-    B: VecBuffer + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
+    B: VecBufferSpawn + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
 {
     const NEW: Self = Self::NEW;
 
@@ -154,11 +150,7 @@ where
 }
 
 pub trait VecBufferSpawn: VecBuffer {
-    #[inline]
-    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        let _ = (capacity, exact);
-        Err(StorageError::Unsupported)
-    }
+    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
 }
 
 impl<'a, B, T, I: Index> VecBufferSpawn for B
@@ -168,8 +160,13 @@ where
 {
     #[inline]
     fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        let length = self.length();
-        self.spawn_handle(VecHeader { capacity, length }, exact)
+        self.spawn_handle(
+            VecHeader {
+                capacity,
+                length: Index::ZERO,
+            },
+            exact,
+        )
     }
 }
 
@@ -191,6 +188,15 @@ impl<'a, T: 'a, const N: usize> VecBuffer for InlineBuffer<T, N> {
     unsafe fn set_length(&mut self, len: usize) {
         self.length = len;
     }
+
+    #[inline]
+    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
+        if (!exact && capacity.to_usize() < N) || capacity.to_usize() == N {
+            Ok(())
+        } else {
+            Err(StorageError::CapacityLimit)
+        }
+    }
 }
 
 impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
@@ -198,7 +204,7 @@ impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
 
     #[inline]
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        if !exact || capacity.to_usize() == N {
+        if (!exact && capacity.to_usize() < N) || capacity.to_usize() == N {
             Ok(Self::NEW)
         } else {
             Err(StorageError::CapacityLimit)

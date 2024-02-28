@@ -1,5 +1,6 @@
 use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering;
+use core::fmt;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 use core::ptr::{self, NonNull};
@@ -48,7 +49,6 @@ fn bounds<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
     Range { start, end }
 }
 
-#[derive(Debug)]
 #[repr(transparent)]
 pub struct Vec<T, C: VecConfig = Global> {
     buffer: C::Buffer<T>,
@@ -856,6 +856,12 @@ impl<T: Clone, C: VecConfigSpawn<T>> Clone for Vec<T, C> {
     fn clone_from(&mut self, source: &Self) {
         self.truncate(C::Index::ZERO);
         self.extend_from_slice(source);
+    }
+}
+
+impl<T: fmt::Debug, C: VecConfig> fmt::Debug for Vec<T, C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (&**self).fmt(f)
     }
 }
 

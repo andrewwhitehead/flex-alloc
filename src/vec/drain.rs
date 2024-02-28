@@ -1,3 +1,5 @@
+use core::fmt;
+use core::fmt::Debug;
 use core::iter::FusedIterator;
 use core::ops::Range;
 use core::ptr;
@@ -8,7 +10,6 @@ use crate::index::Index;
 use super::buffer::VecBuffer;
 use super::index_panic;
 
-#[derive(Debug)]
 pub struct Drain<'d, B: VecBuffer> {
     pub(super) range: Range<usize>,
     pub(super) remain: Range<usize>,
@@ -87,6 +88,15 @@ impl<'d, B: VecBuffer> Drain<'d, B> {
 impl<'d, B: VecBuffer> AsRef<[B::Data]> for Drain<'d, B> {
     fn as_ref(&self) -> &[B::Data] {
         self.as_slice()
+    }
+}
+
+impl<'d, B: VecBuffer> fmt::Debug for Drain<'d, B>
+where
+    B::Data: Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Drain").field(&self.as_slice()).finish()
     }
 }
 

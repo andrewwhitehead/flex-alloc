@@ -57,7 +57,7 @@ pub const fn aligned_byte_storage<T, const N: usize>() -> ByteStorage<T, N> {
 #[derive(Debug)]
 pub struct Fixed<'a>(PhantomData<&'a mut ()>);
 
-#[derive(Debug)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Inline<const N: usize>;
 
 #[derive(Debug)]
