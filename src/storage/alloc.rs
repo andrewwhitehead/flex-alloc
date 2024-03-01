@@ -613,15 +613,15 @@ where
 {
     #[inline]
     fn default() -> Self {
-        Self::new(A::default())
+        Self::new(A::default(), ptr::null())
     }
 }
 
 impl<A: RawAlloc> SpillAlloc<'_, A> {
-    pub(crate) const fn new(alloc: A) -> Self {
+    pub(crate) const fn new(alloc: A, initial: *const u8) -> Self {
         Self {
             alloc,
-            initial: ptr::null(),
+            initial,
             _fixed: FixedAlloc::NEW,
         }
     }
@@ -648,13 +648,13 @@ impl<'a, A: RawAllocNew> Clone for SpillAlloc<'a, A> {
 }
 
 impl<'a, A: RawAllocNew> RawAllocNew for SpillAlloc<'a, A> {
-    const NEW: Self = Self::new(A::NEW);
+    const NEW: Self = Self::new(A::NEW, ptr::null());
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct SpillStorage<'a, I: 'a, A> {
-    buffer: I,
-    alloc: A,
+    pub(crate) buffer: I,
+    pub(crate) alloc: A,
     _pd: PhantomData<&'a mut ()>,
 }
 

@@ -19,7 +19,10 @@ pub trait RawBuffer: Sized {
 pub trait WithAlloc<'a> {
     type Init;
 
-    fn with_alloc(&'a mut self) -> SpillStorage<'a, Self::Init, Global>;
+    #[inline]
+    fn with_alloc(&'a mut self) -> SpillStorage<'a, Self::Init, Global> {
+        Self::with_alloc_in(self, Global)
+    }
 
     fn with_alloc_in<A: RawAlloc>(&'a mut self, alloc: A) -> SpillStorage<'a, Self::Init, A>;
 }
@@ -40,23 +43,10 @@ impl<T, const N: usize> ByteStorage<T, N> {
     pub(crate) fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<u8>] {
         unsafe { &mut self.data }
     }
-
-    // pub fn with_alloc(&mut self) -> FlexStorage<'_, &mut Self, Global> {
-    //     FlexStorage::new(self)
-    // }
-
-    // pub fn with_alloc_in<A: RawAlloc>(&mut self, alloc: A) -> FlexStorage<'_, &mut Self, A> {
-    //     FlexStorage::new_in(self, alloc)
-    // }
 }
 
 impl<'a, T: 'a, const N: usize> WithAlloc<'a> for ByteStorage<T, N> {
     type Init = &'a mut Self;
-
-    #[inline]
-    fn with_alloc(&'a mut self) -> SpillStorage<'a, Self::Init, Global> {
-        SpillStorage::new(self)
-    }
 
     #[inline]
     fn with_alloc_in<A: RawAlloc>(&'a mut self, alloc: A) -> SpillStorage<'a, Self::Init, A> {

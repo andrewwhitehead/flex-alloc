@@ -512,6 +512,19 @@ fn vec_new_in_array() {
 }
 
 #[test]
+fn vec_new_in_array_with_alloc() {
+    let mut z = array_storage::<_, 3>();
+    // alloc will fit inside array storage
+    let mut b = FlexVec::new_in(z.with_alloc());
+    b.push(32);
+    drop(b);
+
+    // alloc will not fit inside array storage
+    let mut b = FlexVec::from_slice_in(&[0, 1, 2, 3, 4, 5, 6, 7], z.with_alloc());
+    b.extend_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
+}
+
+#[test]
 fn vec_new_in_array_zst() {
     struct Item;
     let mut z = array_storage::<Item, 32>();
@@ -537,7 +550,7 @@ fn vec_new_in_bytes() {
 }
 
 #[test]
-fn vec_new_in_bytes_flex() {
+fn vec_new_in_bytes_with_alloc() {
     let mut z = byte_storage::<20>();
     // alloc should fit inside byte storage
     let mut b = FlexVec::new_in(z.with_alloc());
