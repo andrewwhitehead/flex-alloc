@@ -5,11 +5,12 @@ use core::ptr::NonNull;
 
 use crate::error::StorageError;
 use crate::index::{Grow, GrowDoubling, GrowExact, Index};
-use crate::storage::alloc::{AllocHandle, FatAllocHandle, FixedAlloc, ThinAllocHandle};
-use crate::storage::{
-    AllocHandleParts, Fixed, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn, RawAllocNew,
+use crate::storage::alloc::{
+    AllocHandle, AllocHandleParts, FatAllocHandle, FixedAlloc, ThinAllocHandle,
 };
-use crate::Thin;
+use crate::storage::{
+    Fixed, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn, RawAllocNew, Thin,
+};
 
 use super::buffer::{VecBuffer, VecBufferNew, VecBufferSpawn, VecData, VecHeader};
 

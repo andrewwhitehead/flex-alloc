@@ -54,7 +54,7 @@ impl<A: RawAlloc> RawAllocIn for A {
     }
 }
 
-pub trait RawAllocNew: RawAlloc + Clone + Copy {
+pub trait RawAllocNew: RawAlloc + Clone {
     const NEW: Self;
 }
 
@@ -561,6 +561,10 @@ pub struct Thin;
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct FixedAlloc<'a>(PhantomData<&'a mut ()>);
 
+impl FixedAlloc<'_> {
+    pub(crate) const NEW: Self = Self(PhantomData);
+}
+
 impl RawAlloc for FixedAlloc<'_> {
     #[inline]
     fn try_alloc(&self, _layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
@@ -593,5 +597,113 @@ impl<'a, T, const N: usize> RawAllocIn for &'a mut ByteStorage<T, N> {
         let ptr = layout_aligned_bytes(self.as_uninit_slice(), layout)?;
         let alloc = FixedAlloc::default();
         Ok((ptr, alloc))
+    }
+}
+
+#[derive(Debug)]
+pub struct SpillAlloc<'a, A> {
+    alloc: A,
+    initial: *const u8,
+    _fixed: FixedAlloc<'a>,
+}
+
+impl<A: RawAlloc> Default for SpillAlloc<'_, A>
+where
+    A: Default,
+{
+    #[inline]
+    fn default() -> Self {
+        Self::new(A::default())
+    }
+}
+
+impl<A: RawAlloc> SpillAlloc<'_, A> {
+    pub(crate) const fn new(alloc: A) -> Self {
+        Self {
+            alloc,
+            initial: ptr::null(),
+            _fixed: FixedAlloc::NEW,
+        }
+    }
+}
+
+impl<A: RawAlloc> RawAlloc for SpillAlloc<'_, A> {
+    #[inline]
+    fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
+        self.alloc.try_alloc(layout)
+    }
+
+    #[inline]
+    unsafe fn release(&self, ptr: NonNull<u8>, layout: Layout) {
+        if !ptr::addr_eq(self.initial, ptr.as_ptr()) {
+            self.alloc.release(ptr, layout)
+        }
+    }
+}
+
+impl<'a, A: RawAllocNew> Clone for SpillAlloc<'a, A> {
+    fn clone(&self) -> Self {
+        Self::NEW
+    }
+}
+
+impl<'a, A: RawAllocNew> RawAllocNew for SpillAlloc<'a, A> {
+    const NEW: Self = Self::new(A::NEW);
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct SpillStorage<'a, I: 'a, A> {
+    buffer: I,
+    alloc: A,
+    _pd: PhantomData<&'a mut ()>,
+}
+
+impl<I, A: RawAllocNew> SpillStorage<'_, I, A> {
+    #[inline]
+    pub fn new(buffer: I) -> Self {
+        Self::new_in(buffer, A::NEW)
+    }
+}
+
+impl<I, A: RawAlloc> SpillStorage<'_, I, A> {
+    #[inline]
+    pub fn new_in(buffer: I, alloc: A) -> Self {
+        Self {
+            buffer,
+            alloc,
+            _pd: PhantomData,
+        }
+    }
+}
+
+impl<'a, I, A> RawAllocIn for SpillStorage<'a, I, A>
+where
+    I: RawAllocIn<RawAlloc = FixedAlloc<'a>>,
+    A: RawAlloc,
+{
+    type RawAlloc = SpillAlloc<'a, A>;
+
+    #[inline]
+    fn try_alloc_in(self, layout: Layout) -> Result<(NonNull<[u8]>, Self::RawAlloc), StorageError> {
+        match self.buffer.try_alloc_in(layout) {
+            Ok((ptr, fixed)) => {
+                let alloc = SpillAlloc {
+                    alloc: self.alloc,
+                    initial: ptr.as_ptr().cast(),
+                    _fixed: fixed,
+                };
+                Ok((ptr, alloc))
+            }
+            Err(StorageError::CapacityLimit) => {
+                let ptr = self.alloc.try_alloc(layout)?;
+                let alloc = SpillAlloc {
+                    alloc: self.alloc,
+                    initial: ptr::null(),
+                    _fixed: FixedAlloc::default(),
+                };
+                Ok((ptr, alloc))
+            }
+            Err(err) => Err(err),
+        }
     }
 }

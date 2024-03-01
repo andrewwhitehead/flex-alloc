@@ -1,4 +1,4 @@
-use flex_alloc::{boxed::Box, byte_storage, StorageError};
+use flex_alloc::{boxed::Box, storage::byte_storage, StorageError};
 
 #[cfg(feature = "alloc")]
 use flex_alloc::storage::Global;

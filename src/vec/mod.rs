@@ -1253,7 +1253,7 @@ where
 // leak
 
 /// ```compile_fail,E0597
-/// use flex_alloc::{byte_storage, vec::Vec};
+/// use flex_alloc::{storage::byte_storage, vec::Vec};
 ///
 /// fn run<F: FnOnce() -> () + 'static>(f: F) { f() }
 ///

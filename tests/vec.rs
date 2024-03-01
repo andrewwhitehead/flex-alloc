@@ -6,17 +6,20 @@ use core::mem::{size_of, size_of_val};
 use rstest::rstest;
 
 use flex_alloc::{
-    aligned_byte_storage, array_storage, byte_storage,
     index::Index,
+    storage::{aligned_byte_storage, array_storage, byte_storage, Inline, WithAlloc},
     vec::{
         config::{VecConfig, VecConfigNew, VecNewIn},
         Vec as FlexVec,
     },
-    Inline,
 };
 
 #[cfg(feature = "alloc")]
-use flex_alloc::{boxed::Box as FlexBox, storage::Global, vec::config::Custom, Thin};
+use flex_alloc::{
+    boxed::Box as FlexBox,
+    storage::{Global, Thin},
+    vec::config::Custom,
+};
 
 const SLICE: &[usize] = &[1, 2, 3, 4, 5];
 
@@ -531,6 +534,19 @@ fn vec_new_in_bytes() {
     assert_eq!(b, &[0, 7, 2, 3, 4, 5, 6][..]);
     assert_eq!(b.swap_remove(6), 6);
     assert_eq!(b, &[0, 7, 2, 3, 4, 5][..]);
+}
+
+#[test]
+fn vec_new_in_bytes_flex() {
+    let mut z = byte_storage::<20>();
+    // alloc should fit inside byte storage
+    let mut b = FlexVec::new_in(z.with_alloc());
+    b.push(32);
+    drop(b);
+
+    // alloc will not fit inside byte storage
+    let mut b = FlexVec::from_slice_in(&[0, 1, 2, 3, 4, 5, 6, 7], z.with_alloc());
+    b.extend_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
 }
 
 #[test]

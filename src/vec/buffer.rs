@@ -6,9 +6,9 @@ use core::slice;
 
 use crate::error::StorageError;
 use crate::index::Index;
-use crate::storage::alloc::{AllocHandle, AllocHandleNew};
+use crate::storage::alloc::{AllocHandle, AllocHandleNew, AllocHeader, AllocLayout};
 use crate::storage::utils::array_layout;
-use crate::storage::{AllocHeader, AllocLayout, InlineBuffer, RawBuffer};
+use crate::storage::{InlineBuffer, RawBuffer};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VecHeader<I: Index = usize> {
