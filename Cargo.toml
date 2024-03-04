@@ -11,12 +11,14 @@ categories = ["data-structures", "memory-management", "no-std"]
 keywords = ["vec", "zeroize"]
 
 [features]
-default = ["alloc", "zeroize"]
-alloc = []
+default = ["alloc", "allocator-api2", "zeroize"]
+alloc = ["allocator-api2?/alloc"]
 std = ["alloc"]
+allocator-api2 = ["dep:allocator-api2"]
 # zeroize
 
 [dependencies]
+allocator-api2 = { version = "0.2", default-features = false, optional = true }
 zeroize = { version = "1", default-features = false, optional = true }
 
 [dev-dependencies]

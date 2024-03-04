@@ -1,6 +1,7 @@
 use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering;
 use core::fmt;
+use core::iter::once;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 use core::ptr::{self, NonNull};
@@ -47,6 +48,21 @@ fn bounds<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
         Bound::Excluded(i) => i.to_usize(),
     };
     Range { start, end }
+}
+
+#[cfg(feature = "alloc")]
+#[inline]
+pub fn from_elem<T>(elem: T) -> Vec<T, Global> {
+    Vec::from_iter(once(elem))
+}
+
+#[cfg(feature = "alloc")]
+#[inline]
+pub fn from_elem_in<T, C>(elem: T, alloc_in: C) -> Vec<T, C::Config>
+where
+    C: VecNewIn<T>,
+{
+    Vec::from_iter_in(once(elem), alloc_in)
 }
 
 #[repr(transparent)]
@@ -450,6 +466,21 @@ impl<T, C: VecConfig> Vec<T, C> {
             }
         }
         Ok(())
+    }
+
+    fn from_iter_in<A, I>(iter: A, alloc_in: I) -> Self
+    where
+        A: IntoIterator<Item = T>,
+        I: VecNewIn<T, Config = C>,
+    {
+        let iter = iter.into_iter();
+        let (min_cap, _) = iter.size_hint();
+        let Some(min_cap) = C::Index::try_from_usize(min_cap) else {
+            index_panic();
+        };
+        let mut vec = Self::with_capacity_in(min_cap, alloc_in);
+        vec.extend(iter);
+        vec
     }
 
     pub fn insert(&mut self, index: C::Index, value: T) {
@@ -972,6 +1003,16 @@ where
     }
 }
 
+#[cfg(feature = "allocator-api2")]
+impl<T, C> From<allocator_api2::boxed::Box<[T]>> for Vec<T, C>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: allocator_api2::boxed::Box<[T]>) -> Self {
+        allocator_api2::vec::Vec::<T>::from(vec).into()
+    }
+}
+
 #[cfg(feature = "alloc")]
 impl<T, C> From<Vec<T, C>> for alloc::boxed::Box<[T]>
 where
@@ -982,12 +1023,35 @@ where
     }
 }
 
+#[cfg(feature = "allocator-api2")]
+impl<T, C> From<Vec<T, C>> for allocator_api2::boxed::Box<[T]>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: Vec<T, C>) -> Self {
+        allocator_api2::vec::Vec::<T>::from(vec).into_boxed_slice()
+    }
+}
+
 #[cfg(feature = "alloc")]
 impl<T, C> From<alloc::vec::Vec<T>> for Vec<T, C>
 where
     C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
 {
     fn from(vec: alloc::vec::Vec<T>) -> Self {
+        let capacity = vec.capacity();
+        let length = vec.len();
+        let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
+        unsafe { Self::from_parts(data, length, capacity, Global) }
+    }
+}
+
+#[cfg(feature = "allocator-api2")]
+impl<T, C> From<allocator_api2::vec::Vec<T>> for Vec<T, C>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: allocator_api2::vec::Vec<T>) -> Self {
         let capacity = vec.capacity();
         let length = vec.len();
         let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
@@ -1006,6 +1070,20 @@ where
         let length = buffer.length();
         let data = buffer.data_ptr_mut();
         unsafe { alloc::vec::Vec::from_raw_parts(data, length, capacity) }
+    }
+}
+
+#[cfg(feature = "allocator-api2")]
+impl<T, C> From<Vec<T, C>> for allocator_api2::vec::Vec<T>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: Vec<T, C>) -> Self {
+        let mut buffer = ManuallyDrop::new(vec.into_inner());
+        let capacity = buffer.capacity();
+        let length = buffer.length();
+        let data = buffer.data_ptr_mut();
+        unsafe { allocator_api2::vec::Vec::from_raw_parts(data, length, capacity) }
     }
 }
 
@@ -1230,8 +1308,32 @@ where
     }
 }
 
+#[cfg(feature = "allocator-api2")]
+impl<A, B, C> PartialEq<allocator_api2::vec::Vec<A>> for Vec<B, C>
+where
+    B: PartialEq<A>,
+    C: VecConfig,
+{
+    #[inline]
+    fn eq(&self, other: &allocator_api2::vec::Vec<A>) -> bool {
+        other.eq(self)
+    }
+}
+
 #[cfg(feature = "alloc")]
 impl<A, B, C> PartialEq<Vec<B, C>> for alloc::vec::Vec<A>
+where
+    B: PartialEq<A>,
+    C: VecConfig,
+{
+    #[inline]
+    fn eq(&self, other: &Vec<B, C>) -> bool {
+        other.eq(self)
+    }
+}
+
+#[cfg(feature = "allocator-api2")]
+impl<A, B, C> PartialEq<Vec<B, C>> for allocator_api2::vec::Vec<A>
 where
     B: PartialEq<A>,
     C: VecConfig,

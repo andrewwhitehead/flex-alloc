@@ -27,6 +27,15 @@ pub trait WithAlloc<'a> {
     fn with_alloc_in<A: RawAlloc>(&'a mut self, alloc: A) -> SpillStorage<'a, Self::Init, A>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ArrayStorage<A>(pub A);
+
+impl<A> ArrayStorage<A> {
+    pub const fn new(inner: A) -> Self {
+        Self(inner)
+    }
+}
+
 #[repr(C)]
 pub union ByteStorage<T, const N: usize> {
     _align: [ManuallyDrop<T>; 0],
@@ -56,12 +65,12 @@ impl<'a, T: 'a, const N: usize> WithAlloc<'a> for ByteStorage<T, N> {
 
 impl<T, const N: usize> fmt::Debug for ByteStorage<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ByteBuffer").finish_non_exhaustive()
+        f.debug_struct("ByteStorage").finish_non_exhaustive()
     }
 }
 
-pub const fn array_storage<T, const N: usize>() -> [MaybeUninit<T>; N] {
-    unsafe { MaybeUninit::uninit().assume_init() }
+pub const fn array_storage<T, const N: usize>() -> ArrayStorage<[MaybeUninit<T>; N]> {
+    ArrayStorage::new(unsafe { MaybeUninit::uninit().assume_init() })
 }
 
 pub const fn byte_storage<const N: usize>() -> ByteStorage<u8, N> {

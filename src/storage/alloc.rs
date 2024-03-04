@@ -4,9 +4,12 @@ use core::marker::PhantomData;
 use core::mem::{align_of, offset_of, ManuallyDrop};
 use core::ptr::{self, NonNull};
 
-#[cfg(feature = "alloc")]
+#[cfg(feature = "allocator-api2")]
+pub use allocator_api2::alloc::{Allocator, Global};
+
+#[cfg(all(feature = "alloc", not(feature = "allocator-api2")))]
 use alloc::alloc::{alloc as raw_alloc, dealloc as raw_dealloc};
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", not(feature = "allocator-api2")))]
 use core::mem::transmute;
 
 use crate::error::StorageError;
@@ -58,12 +61,25 @@ pub trait RawAllocNew: RawAlloc + Clone {
     const NEW: Self;
 }
 
-// FIXME use alloc::alloc::Global when allocator_api enabled
+#[cfg(not(feature = "allocator-api2"))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "alloc", derive(Default, Copy))]
 pub struct Global;
 
-#[cfg(feature = "alloc")]
+#[cfg(feature = "allocator-api2")]
+impl<A: Allocator + fmt::Debug> RawAlloc for A {
+    #[inline]
+    fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
+        self.allocate(layout).map_err(|_| StorageError::AllocError)
+    }
+
+    #[inline]
+    unsafe fn release(&self, ptr: NonNull<u8>, layout: Layout) {
+        self.deallocate(ptr, layout)
+    }
+}
+
+#[cfg(all(feature = "alloc", not(feature = "allocator-api2")))]
 impl RawAlloc for Global {
     #[inline]
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
