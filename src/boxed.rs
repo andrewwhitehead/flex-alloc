@@ -521,6 +521,9 @@ impl<T: ?Sized + Ord, A: RawAlloc> Ord for Box<T, A> {
 
 impl<T: ?Sized, A: RawAlloc> Unpin for Box<T, A> {}
 
+#[cfg(feature = "zeroize")]
+impl<T, C: RawAlloc> zeroize::ZeroizeOnDrop for Box<T, crate::storage::ZeroizingAlloc<C>> {}
+
 // new_zeroed
 // new_zeroed_in
 // new_zeroed_slice

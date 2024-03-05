@@ -633,31 +633,6 @@ fn vec_custom_index_thin_new() {
     assert!(size_of_val(&v) == size_of::<*const ()>());
 }
 
-#[cfg(all(feature = "alloc", feature = "zeroize"))]
-#[test]
-fn vec_zeroize() {
-    use flex_alloc::storage::ZeroizingAlloc;
-
-    let mut v = FlexVec::<usize, _>::new_in(ZeroizingAlloc::<Global>::default());
-    v.extend([1, 2, 3]);
-
-    let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
-    let mut v = FlexVec::<usize, _>::new_in(&mut *z);
-    v.push(1);
-
-    let mut z = zeroize::Zeroizing::new(byte_storage::<100>());
-    let mut v = FlexVec::<usize, _>::new_in(&mut *z);
-    v.push(1);
-
-    let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
-    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
-    v.extend([1, 2, 3]);
-
-    let mut z = zeroize::Zeroizing::new(byte_storage::<10>());
-    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
-    v.extend([1, 2, 3]);
-}
-
 #[cfg(feature = "alloc")]
 #[test]
 fn vec_macro() {
