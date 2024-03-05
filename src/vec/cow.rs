@@ -49,6 +49,7 @@ impl<'a, T: Clone, A: RawAllocNew> FromIterator<T> for Cow<'a, [T], A> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "alloc")]
     use super::*;
 
     #[cfg(feature = "alloc")]

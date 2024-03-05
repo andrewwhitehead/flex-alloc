@@ -84,6 +84,13 @@ fn test_boxed_str_from() {
     assert_eq!(&*s, "hello");
 }
 
+#[cfg(feature = "alloc")]
+#[test]
+fn test_boxed_array_slice() {
+    let s = Box::<_>::new([1, 2, 3]);
+    assert_eq!(&*Box::slice(s), &[1, 2, 3]);
+}
+
 // #[cfg(feature = "alloc")]
 // #[test]
 // fn test_boxed_from_alloc() {

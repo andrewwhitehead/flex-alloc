@@ -164,9 +164,7 @@ impl<T, A: RawAlloc> Box<[T], A> {
         let data = ptr::slice_from_raw_parts_mut(data.as_ptr().cast(), length);
         Self::from_parts(NonNull::new_unchecked(data), alloc)
     }
-}
 
-impl<T, A: RawAlloc> Box<[T], A> {
     #[inline]
     pub fn new_uninit_slice_in<I>(length: usize, alloc_in: I) -> Box<[MaybeUninit<T>], A>
     where
@@ -188,6 +186,11 @@ impl<T, A: RawAlloc> Box<[T], A> {
         let layout = Layout::array::<MaybeUninit<T>>(length)?;
         let (data, alloc) = alloc_in.try_alloc_in(layout)?;
         Ok(unsafe { Box::slice_from_parts(data.cast(), alloc, length) })
+    }
+
+    #[inline]
+    pub fn into_vec(self) -> Vec<T, A> {
+        self.into()
     }
 }
 
@@ -213,6 +216,19 @@ impl<T, A: RawAllocNew> Box<[T], A> {
             buf[idx].write(data[idx]);
         }
         unsafe { boxed.assume_init() }
+    }
+}
+
+impl<T, A: RawAlloc, const N: usize> Box<[T; N], A> {
+    #[inline]
+    pub fn slice(boxed: Self) -> Box<[T], A> {
+        let (data, alloc) = boxed.into_parts();
+        unsafe { Box::slice_from_parts(data.cast(), alloc, N) }
+    }
+
+    #[inline]
+    pub fn into_vec(self) -> Vec<T, A> {
+        Box::slice(self).into()
     }
 }
 

@@ -11,7 +11,7 @@ categories = ["data-structures", "memory-management", "no-std"]
 keywords = ["vec", "zeroize"]
 
 [features]
-default = ["alloc", "allocator-api2", "zeroize"]
+default = ["alloc", "zeroize"]
 alloc = ["allocator-api2?/alloc"]
 std = ["alloc"]
 allocator-api2 = ["dep:allocator-api2"]

@@ -1,12 +1,19 @@
 use core::fmt;
-use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};
 
 pub(crate) mod alloc;
 
 pub(crate) mod utils;
 
-pub use self::alloc::{Global, RawAlloc, RawAllocIn, RawAllocNew, SpillStorage, Thin};
+#[cfg(feature = "zeroize")]
+pub(crate) mod zero;
+
+pub use self::alloc::{
+    FixedAlloc, Global, RawAlloc, RawAllocIn, RawAllocNew, SpillAlloc, SpillStorage, Thin,
+};
+
+#[cfg(feature = "zeroize")]
+pub use self::zero::ZeroizingAlloc;
 
 pub trait RawBuffer: Sized {
     type RawData: ?Sized;
@@ -16,18 +23,18 @@ pub trait RawBuffer: Sized {
     fn data_ptr_mut(&mut self) -> *mut Self::RawData;
 }
 
-pub trait WithAlloc<'a> {
-    type Init;
+pub trait WithAlloc<'a>: Sized {
+    type NewIn<A: 'a>;
 
     #[inline]
-    fn with_alloc(&'a mut self) -> SpillStorage<'a, Self::Init, Global> {
+    fn with_alloc(self) -> Self::NewIn<Global> {
         Self::with_alloc_in(self, Global)
     }
 
-    fn with_alloc_in<A: RawAlloc>(&'a mut self, alloc: A) -> SpillStorage<'a, Self::Init, A>;
+    fn with_alloc_in<A: RawAlloc + 'a>(self, alloc: A) -> Self::NewIn<A>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ArrayStorage<A>(pub A);
 
 impl<A> ArrayStorage<A> {
@@ -54,11 +61,11 @@ impl<T, const N: usize> ByteStorage<T, N> {
     }
 }
 
-impl<'a, T: 'a, const N: usize> WithAlloc<'a> for ByteStorage<T, N> {
-    type Init = &'a mut Self;
+impl<'a, T: 'static, const N: usize> WithAlloc<'a> for &'a mut ByteStorage<T, N> {
+    type NewIn<A: 'a> = SpillStorage<'a, Self, A>;
 
     #[inline]
-    fn with_alloc_in<A: RawAlloc>(&'a mut self, alloc: A) -> SpillStorage<'a, Self::Init, A> {
+    fn with_alloc_in<A: RawAlloc + 'a>(self, alloc: A) -> Self::NewIn<A> {
         SpillStorage::new_in(self, alloc)
     }
 }
@@ -80,9 +87,6 @@ pub const fn byte_storage<const N: usize>() -> ByteStorage<u8, N> {
 pub const fn aligned_byte_storage<T, const N: usize>() -> ByteStorage<T, N> {
     ByteStorage::<T, N>::new()
 }
-
-#[derive(Debug)]
-pub struct Fixed<'a>(PhantomData<&'a mut ()>);
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Inline<const N: usize>;

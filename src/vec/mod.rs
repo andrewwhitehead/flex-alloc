@@ -1,7 +1,7 @@
 use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering;
 use core::fmt;
-use core::iter::once;
+use core::iter::repeat;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
 use core::ptr::{self, NonNull};
@@ -11,6 +11,9 @@ use crate::boxed::Box;
 use crate::error::{InsertionError, StorageError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
+
+#[cfg(feature = "zeroize")]
+use crate::storage::{RawAlloc, ZeroizingAlloc};
 
 use self::buffer::VecBuffer;
 use self::config::{
@@ -22,6 +25,9 @@ pub use self::{drain::Drain, into_iter::IntoIter, splice::Splice};
 
 pub mod buffer;
 pub mod config;
+
+#[macro_use]
+mod macros;
 
 mod cow;
 mod drain;
@@ -52,17 +58,16 @@ fn bounds<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
 
 #[cfg(feature = "alloc")]
 #[inline]
-pub fn from_elem<T>(elem: T) -> Vec<T, Global> {
-    Vec::from_iter(once(elem))
+pub fn from_elem<T: Clone>(elem: T, count: usize) -> Vec<T, Global> {
+    Vec::from_iter(repeat(elem).take(count))
 }
 
-#[cfg(feature = "alloc")]
 #[inline]
-pub fn from_elem_in<T, C>(elem: T, alloc_in: C) -> Vec<T, C::Config>
+pub fn from_elem_in<T: Clone, C>(elem: T, count: usize, alloc_in: C) -> Vec<T, C::Config>
 where
     C: VecNewIn<T>,
 {
-    Vec::from_iter_in(once(elem), alloc_in)
+    Vec::from_iter_in(repeat(elem).take(count), alloc_in)
 }
 
 #[repr(transparent)]
@@ -984,6 +989,7 @@ where
 }
 
 impl<T, C: VecConfigAllocParts<T>> From<Box<[T], C::Alloc>> for Vec<T, C> {
+    #[inline]
     fn from(boxed: Box<[T], C::Alloc>) -> Self {
         let (ptr, alloc) = Box::into_parts(boxed);
         let Some(length) = C::Index::try_from_usize(ptr.len()) else {
@@ -998,6 +1004,7 @@ impl<T, C> From<alloc::boxed::Box<[T]>> for Vec<T, C>
 where
     C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
 {
+    #[inline]
     fn from(vec: alloc::boxed::Box<[T]>) -> Self {
         alloc::vec::Vec::<T>::from(vec).into()
     }
@@ -1343,6 +1350,9 @@ where
         other.eq(self)
     }
 }
+
+#[cfg(feature = "zeroize")]
+impl<T, C: RawAlloc> zeroize::ZeroizeOnDrop for Vec<T, ZeroizingAlloc<C>> {}
 
 // FIXME
 // From<String>

@@ -571,9 +571,6 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> Drop for ThinAllocHandle<Meta, Alloc> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Thin;
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct FixedAlloc<'a>(PhantomData<&'a mut ()>);
 
@@ -723,3 +720,6 @@ where
         }
     }
 }
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Thin;

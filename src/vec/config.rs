@@ -9,8 +9,8 @@ use crate::storage::alloc::{
     AllocHandle, AllocHandleParts, FatAllocHandle, FixedAlloc, SpillAlloc, ThinAllocHandle,
 };
 use crate::storage::{
-    ArrayStorage, Fixed, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn, RawAllocNew,
-    SpillStorage, Thin, WithAlloc,
+    ArrayStorage, Global, Inline, InlineBuffer, RawAlloc, RawAllocIn, RawAllocNew, SpillStorage,
+    Thin, WithAlloc,
 };
 
 use super::buffer::{VecBuffer, VecBufferNew, VecBufferSpawn, VecData, VecHeader};
@@ -151,10 +151,10 @@ impl<C: VecAlloc, I: Index, G: Grow> VecConfig for Custom<C, I, G> {
     type Index = I;
 }
 
-impl<'a> VecAlloc for Fixed<'a> {
-    type RawAlloc = FixedAlloc<'a>;
-    type AllocHandle<T, I: Index> = FatAllocHandle<VecData<T, I>, Self::RawAlloc>;
-}
+// impl<'a> VecAlloc for Fixed<'a> {
+//     type RawAlloc = FixedAlloc<'a>;
+//     type AllocHandle<T, I: Index> = FatAllocHandle<VecData<T, I>, Self::RawAlloc>;
+// }
 
 impl<const N: usize> VecConfig for Inline<N> {
     type Buffer<T> = InlineBuffer<T, N>;
@@ -218,7 +218,7 @@ impl<T, C: VecAlloc, I: Index, G: Grow> VecNewIn<T> for Custom<C, I, G> {
 }
 
 impl<'a, T> VecNewIn<T> for ArrayStorage<&'a mut [MaybeUninit<T>]> {
-    type Config = Fixed<'a>;
+    type Config = FixedAlloc<'a>;
 
     #[inline]
     fn vec_try_new_in(
@@ -245,19 +245,16 @@ impl<'a, T> VecNewIn<T> for ArrayStorage<&'a mut [MaybeUninit<T>]> {
 }
 
 impl<'a, T: 'a> WithAlloc<'a> for ArrayStorage<&'a mut [MaybeUninit<T>]> {
-    type Init = Self;
+    type NewIn<A: 'a> = SpillStorage<'a, &'a mut [MaybeUninit<T>], A>;
 
     #[inline]
-    fn with_alloc_in<A: RawAlloc>(
-        &'a mut self,
-        alloc: A,
-    ) -> crate::storage::SpillStorage<'a, Self::Init, A> {
-        SpillStorage::new_in(ArrayStorage::new(self.0), alloc)
+    fn with_alloc_in<A: RawAlloc + 'a>(self, alloc: A) -> Self::NewIn<A> {
+        SpillStorage::new_in(self.0, alloc)
     }
 }
 
 impl<'a, T, const N: usize> VecNewIn<T> for &'a mut ArrayStorage<[MaybeUninit<T>; N]> {
-    type Config = Fixed<'a>;
+    type Config = FixedAlloc<'a>;
 
     #[inline]
     fn vec_try_new_in(
@@ -282,21 +279,16 @@ impl<'a, T, const N: usize> VecNewIn<T> for &'a mut ArrayStorage<[MaybeUninit<T>
     }
 }
 
-impl<'a, T: 'a, const N: usize> WithAlloc<'a> for ArrayStorage<[MaybeUninit<T>; N]> {
-    type Init = ArrayStorage<&'a mut [MaybeUninit<T>]>;
+impl<'a, T: 'a, const N: usize> WithAlloc<'a> for &'a mut ArrayStorage<[MaybeUninit<T>; N]> {
+    type NewIn<A: 'a> = SpillStorage<'a, &'a mut [MaybeUninit<T>], A>;
 
     #[inline]
-    fn with_alloc_in<A: RawAlloc>(
-        &'a mut self,
-        alloc: A,
-    ) -> crate::storage::SpillStorage<'a, Self::Init, A> {
-        SpillStorage::new_in(ArrayStorage::new(&mut self.0), alloc)
+    fn with_alloc_in<A: RawAlloc + 'a>(self, alloc: A) -> Self::NewIn<A> {
+        SpillStorage::new_in(&mut self.0, alloc)
     }
 }
 
-impl<'a, T, A: RawAlloc> VecNewIn<T>
-    for SpillStorage<'a, ArrayStorage<&'a mut [MaybeUninit<T>]>, A>
-{
+impl<'a, T, A: RawAlloc> VecNewIn<T> for SpillStorage<'a, &'a mut [MaybeUninit<T>], A> {
     type Config = SpillAlloc<'a, A>;
 
     fn vec_try_new_in(
@@ -304,8 +296,7 @@ impl<'a, T, A: RawAlloc> VecNewIn<T>
         mut capacity: <Self::Config as VecConfig>::Index,
         exact: bool,
     ) -> Result<<Self::Config as VecConfig>::Buffer<T>, StorageError> {
-        let data = self.buffer.0;
-        if capacity > data.len() {
+        if capacity > self.buffer.len() {
             return <Self::Config as VecConfig>::Buffer::<T>::alloc_handle_in(
                 SpillAlloc::new(self.alloc, ptr::null()),
                 VecHeader {
@@ -316,9 +307,9 @@ impl<'a, T, A: RawAlloc> VecNewIn<T>
             );
         }
         if !exact {
-            capacity = data.len();
+            capacity = self.buffer.len();
         }
-        let ptr = data.as_mut_ptr();
+        let ptr = self.buffer.as_mut_ptr();
         Ok(<Self::Config as VecConfig>::Buffer::<T>::handle_from_parts(
             VecHeader {
                 capacity,

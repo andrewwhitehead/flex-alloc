@@ -7,7 +7,7 @@ use rstest::rstest;
 
 use flex_alloc::{
     index::Index,
-    storage::{aligned_byte_storage, array_storage, byte_storage, Inline, WithAlloc},
+    storage::{aligned_byte_storage, array_storage, byte_storage, Inline},
     vec::{
         config::{VecConfig, VecConfigNew, VecNewIn},
         Vec as FlexVec,
@@ -17,7 +17,8 @@ use flex_alloc::{
 #[cfg(feature = "alloc")]
 use flex_alloc::{
     boxed::Box as FlexBox,
-    storage::{Global, Thin},
+    storage::{Global, Thin, WithAlloc},
+    vec,
     vec::config::Custom,
 };
 
@@ -531,6 +532,7 @@ fn vec_new_in_array() {
     assert_eq!(b, &[0, 7, 2, 3, 4, 5][..]);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn vec_new_in_array_with_alloc() {
     let mut z = array_storage::<_, 3>();
@@ -569,6 +571,7 @@ fn vec_new_in_bytes() {
     assert_eq!(b, &[0, 7, 2, 3, 4, 5][..]);
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn vec_new_in_bytes_with_alloc() {
     let mut z = byte_storage::<20>();
@@ -628,4 +631,51 @@ fn vec_custom_index_thin_new() {
     v.resize(255, 1);
     assert!(v.try_push(1).is_err());
     assert!(size_of_val(&v) == size_of::<*const ()>());
+}
+
+#[cfg(all(feature = "alloc", feature = "zeroize"))]
+#[test]
+fn vec_zeroize() {
+    use flex_alloc::storage::ZeroizingAlloc;
+
+    let mut v = FlexVec::<usize, _>::new_in(ZeroizingAlloc::<Global>::default());
+    v.extend([1, 2, 3]);
+
+    let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
+    let mut v = FlexVec::<usize, _>::new_in(&mut *z);
+    v.push(1);
+
+    let mut z = zeroize::Zeroizing::new(byte_storage::<100>());
+    let mut v = FlexVec::<usize, _>::new_in(&mut *z);
+    v.push(1);
+
+    let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
+    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
+    v.extend([1, 2, 3]);
+
+    let mut z = zeroize::Zeroizing::new(byte_storage::<10>());
+    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
+    v.extend([1, 2, 3]);
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn vec_macro() {
+    let v: FlexVec<i32> = vec![];
+    assert_eq!(&v, &[]);
+
+    let v: FlexVec<i32> = vec![in Global];
+    assert_eq!(&v, &[]);
+
+    let v = vec![1; 5];
+    assert_eq!(&v, &[1, 1, 1, 1, 1]);
+
+    let v = vec![in Global; 1; 5];
+    assert_eq!(&v, &[1, 1, 1, 1, 1]);
+
+    let v = vec![1, 2, 3];
+    assert_eq!(&v, &[1, 2, 3]);
+
+    let v = vec![in Global; 1, 2, 3];
+    assert_eq!(&v, &[1, 2, 3]);
 }
