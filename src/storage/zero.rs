@@ -20,7 +20,7 @@ impl<A: RawAlloc> RawAlloc for ZeroizingAlloc<A> {
     }
 
     // default implementation of `try_resize`` will always allocate a new buffer and
-    // release the old one, zeroizing it.
+    // release the old one, allowing it to be zeroized below.
 
     #[inline]
     unsafe fn release(&self, ptr: NonNull<u8>, layout: Layout) {

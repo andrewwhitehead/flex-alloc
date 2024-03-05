@@ -8,7 +8,7 @@ use core::slice;
 use flex_alloc::{
     boxed::Box as FlexBox,
     storage::{array_storage, byte_storage, Global, RawAlloc, WithAlloc, ZeroizingAlloc},
-    vec::Vec as FlexVec,
+    vec::{Vec as FlexVec, ZeroizingVec},
 };
 
 #[derive(Debug)]
@@ -97,5 +97,9 @@ fn vec_zeroize() {
 
     let mut z = zeroize::Zeroizing::new(byte_storage::<10>());
     let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
+    v.extend([1, 2, 3]);
+
+    // test type alias
+    let mut v = ZeroizingVec::new();
     v.extend([1, 2, 3]);
 }

@@ -10,7 +10,7 @@ use flex_alloc::{
     storage::{aligned_byte_storage, array_storage, byte_storage, Inline},
     vec::{
         config::{VecConfig, VecConfigNew, VecNewIn},
-        Vec as FlexVec,
+        InlineVec, Vec as FlexVec,
     },
 };
 
@@ -19,7 +19,7 @@ use flex_alloc::{
     boxed::Box as FlexBox,
     storage::{Global, Thin, WithAlloc},
     vec,
-    vec::config::Custom,
+    vec::{config::Custom, ThinVec},
 };
 
 const SLICE: &[usize] = &[1, 2, 3, 4, 5];
@@ -503,7 +503,7 @@ fn vec_into_std_boxed_slice() {
 
 #[test]
 fn vec_inline() {
-    let mut b = FlexVec::<usize, Inline<10>>::new();
+    let mut b = InlineVec::<usize, 10>::new();
     b.push(32);
     assert_eq!(b.as_slice(), &[32]);
     assert_eq!(b.pop(), Some(32));
@@ -610,6 +610,15 @@ fn vec_new_in_bytes_aligned() {
     assert_eq!(b, &[0, 7, 2, 3, 4, 5, 6][..]);
     assert_eq!(b.swap_remove(6), 6);
     assert_eq!(b, &[0, 7, 2, 3, 4, 5][..]);
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn vec_thin() {
+    let mut v = ThinVec::<usize>::new();
+    v.push(32);
+    assert_eq!(&v, &[32]);
+    assert!(size_of_val(&v) == size_of::<*const ()>());
 }
 
 #[cfg(feature = "alloc")]

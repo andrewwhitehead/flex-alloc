@@ -12,10 +12,10 @@ keywords = ["vec", "zeroize"]
 
 [features]
 default = ["alloc", "zeroize"]
-alloc = ["allocator-api2?/alloc"]
-std = ["alloc"]
+alloc = ["allocator-api2?/alloc", "zeroize?/alloc"]
+std = ["alloc", "allocator-api2?/std", "zeroize?/std"]
 allocator-api2 = ["dep:allocator-api2"]
-# zeroize
+zeroize = ["dep:zeroize"]
 
 [dependencies]
 allocator-api2 = { version = "0.2", default-features = false, optional = true }

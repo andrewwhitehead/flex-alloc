@@ -12,9 +12,6 @@ use crate::error::{InsertionError, StorageError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
 
-#[cfg(feature = "zeroize")]
-use crate::storage::{RawAlloc, ZeroizingAlloc};
-
 use self::buffer::VecBuffer;
 use self::config::{
     VecConfig, VecConfigAlloc, VecConfigAllocParts, VecConfigNew, VecConfigSpawn, VecNewIn,
@@ -34,6 +31,14 @@ mod drain;
 pub(crate) mod insert;
 mod into_iter;
 mod splice;
+
+pub type InlineVec<T, const N: usize> = Vec<T, crate::storage::Inline<N>>;
+
+#[cfg(feature = "alloc")]
+pub type ThinVec<T> = Vec<T, crate::storage::Thin>;
+
+#[cfg(feature = "zeroize")]
+pub type ZeroizingVec<T> = Vec<T, crate::storage::ZeroizingAlloc<Global>>;
 
 #[cold]
 #[inline(never)]
@@ -58,13 +63,32 @@ fn bounds<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
 
 #[cfg(feature = "alloc")]
 #[inline]
+pub fn from_array<T, const N: usize>(data: [T; N]) -> Vec<T> {
+    let mut v = Vec::new();
+    v.extend(data);
+    v
+}
+
+#[inline]
+pub fn from_array_in<T, C, const N: usize>(data: [T; N], alloc_in: C) -> Vec<T, C::Config>
+where
+    C: VecNewIn<T>,
+{
+    let mut v = Vec::new_in(alloc_in);
+    v.extend(data);
+    v
+}
+
+#[cfg(feature = "alloc")]
+#[inline]
 pub fn from_elem<T: Clone>(elem: T, count: usize) -> Vec<T, Global> {
     Vec::from_iter(repeat(elem).take(count))
 }
 
 #[inline]
-pub fn from_elem_in<T: Clone, C>(elem: T, count: usize, alloc_in: C) -> Vec<T, C::Config>
+pub fn from_elem_in<T, C>(elem: T, count: usize, alloc_in: C) -> Vec<T, C::Config>
 where
+    T: Clone,
     C: VecNewIn<T>,
 {
     Vec::from_iter_in(repeat(elem).take(count), alloc_in)
@@ -1352,7 +1376,20 @@ where
 }
 
 #[cfg(feature = "zeroize")]
-impl<T, C: RawAlloc> zeroize::ZeroizeOnDrop for Vec<T, ZeroizingAlloc<C>> {}
+impl<T, C: crate::storage::RawAlloc> zeroize::Zeroize
+    for Vec<T, crate::storage::ZeroizingAlloc<C>>
+{
+    #[inline]
+    fn zeroize(&mut self) {
+        self.shrink_to(0);
+    }
+}
+
+#[cfg(feature = "zeroize")]
+impl<T, C: crate::storage::RawAlloc> zeroize::ZeroizeOnDrop
+    for Vec<T, crate::storage::ZeroizingAlloc<C>>
+{
+}
 
 // FIXME
 // From<String>
@@ -1373,4 +1410,5 @@ impl<T, C: RawAlloc> zeroize::ZeroizeOnDrop for Vec<T, ZeroizingAlloc<C>> {}
 /// let mut v = Vec::<usize, _>::new_in(&mut buf);
 /// run(move || v.clear());
 /// ```
+#[cfg(doctest)]
 fn _lifetime_check() {}

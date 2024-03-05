@@ -522,7 +522,18 @@ impl<T: ?Sized + Ord, A: RawAlloc> Ord for Box<T, A> {
 impl<T: ?Sized, A: RawAlloc> Unpin for Box<T, A> {}
 
 #[cfg(feature = "zeroize")]
+impl<T: zeroize::Zeroize, C: RawAlloc> zeroize::Zeroize for Box<T, C> {
+    #[inline]
+    fn zeroize(&mut self) {
+        self.deref_mut().zeroize()
+    }
+}
+
+#[cfg(feature = "zeroize")]
 impl<T, C: RawAlloc> zeroize::ZeroizeOnDrop for Box<T, crate::storage::ZeroizingAlloc<C>> {}
+
+#[cfg(feature = "zeroize")]
+pub type ZeroizingBox<T> = Box<T, crate::storage::ZeroizingAlloc<Global>>;
 
 // new_zeroed
 // new_zeroed_in
