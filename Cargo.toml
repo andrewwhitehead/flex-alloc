@@ -9,6 +9,7 @@ readme = "README.md"
 repository = "https://github.com/andrewwhitehead/flex-alloc/"
 categories = ["data-structures", "memory-management", "no-std"]
 keywords = ["vec", "zeroize"]
+rust-version = "1.74"
 
 [features]
 default = ["alloc"]

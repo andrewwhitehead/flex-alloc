@@ -1,7 +1,7 @@
 use core::alloc::Layout;
 use core::fmt;
 use core::marker::PhantomData;
-use core::mem::{align_of, offset_of, ManuallyDrop};
+use core::mem::{align_of, ManuallyDrop};
 use core::ptr::{self, NonNull};
 
 #[cfg(feature = "allocator-api2")]
@@ -406,7 +406,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> Drop for FatAllocHandle<Meta, Alloc> {
 struct ThinPtr<Meta: AllocLayout>(NonNull<Meta::Data>);
 
 impl<Meta: AllocLayout> ThinPtr<Meta> {
-    const DATA_OFFSET: usize = offset_of!((Meta::Header, Meta::Data), 1);
+    const DATA_OFFSET: usize = data_offset::<Meta::Header, Meta::Data>();
 
     #[inline]
     pub const fn dangling() -> Self {
@@ -420,7 +420,11 @@ impl<Meta: AllocLayout> ThinPtr<Meta> {
 
     #[inline]
     pub const fn from_alloc(ptr: NonNull<[u8]>) -> Self {
-        Self(unsafe { NonNull::new_unchecked(ptr.as_ptr().byte_add(Self::DATA_OFFSET)) }.cast())
+        Self(unsafe {
+            NonNull::new_unchecked(
+                (ptr.as_ptr() as *mut u8).add(Self::DATA_OFFSET) as *mut Meta::Data
+            )
+        })
     }
 
     #[inline]
@@ -435,7 +439,7 @@ impl<Meta: AllocLayout> ThinPtr<Meta> {
 
     #[inline]
     pub const fn header_ptr(&self) -> *mut Meta::Header {
-        unsafe { self.0.as_ptr().byte_sub(Self::DATA_OFFSET) }.cast()
+        unsafe { (self.0.as_ptr() as *mut u8).sub(Self::DATA_OFFSET) as *mut _ }
     }
 }
 
@@ -680,7 +684,7 @@ impl<A: RawAlloc> RawAlloc for SpillAlloc<'_, A> {
 
     #[inline]
     unsafe fn release(&self, ptr: NonNull<u8>, layout: Layout) {
-        if !ptr::addr_eq(self.initial, ptr.as_ptr()) {
+        if !ptr::eq(self.initial, ptr.as_ptr()) {
             self.alloc.release(ptr, layout)
         }
     }
@@ -755,3 +759,13 @@ where
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Thin;
+
+// Calculate the byte offset of Data when following Header. This should
+// be equivalent to offset_of!((Meta::Header, Meta::Data), 1)
+// although repr(C) would need to be used to guarantee consistency.
+// See `Layout::padding_needed_for`` (currently unstable) for reference.
+const fn data_offset<Header, Data>() -> usize {
+    let header = Layout::new::<Header>();
+    let data_align = align_of::<Data>();
+    header.size().wrapping_add(data_align).wrapping_sub(1) & !data_align.wrapping_sub(1)
+}

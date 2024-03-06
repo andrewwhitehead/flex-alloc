@@ -21,7 +21,7 @@ pub fn layout_aligned_bytes(
         Err(StorageError::CapacityLimit)
     } else {
         Ok(NonNull::slice_from_raw_parts(
-            unsafe { NonNull::new_unchecked(start.byte_add(offset)) }.cast(),
+            unsafe { NonNull::new_unchecked((start as *mut u8).add(offset)) },
             max_cap,
         ))
     }
