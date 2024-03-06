@@ -20,6 +20,13 @@ use super::{ByteStorage, RawBuffer};
 pub trait RawAlloc: fmt::Debug {
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError>;
 
+    #[inline]
+    fn try_alloc_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
+        let ptr = self.try_alloc(layout)?;
+        unsafe { ptr::write_bytes(ptr.cast::<u8>().as_ptr(), 0, ptr.len()) };
+        Ok(ptr)
+    }
+
     unsafe fn try_resize(
         &self,
         ptr: NonNull<u8>,
@@ -45,6 +52,16 @@ pub trait RawAllocIn: Sized {
     type RawAlloc: RawAlloc;
 
     fn try_alloc_in(self, layout: Layout) -> Result<(NonNull<[u8]>, Self::RawAlloc), StorageError>;
+
+    #[inline]
+    fn try_alloc_in_zeroed(
+        self,
+        layout: Layout,
+    ) -> Result<(NonNull<[u8]>, Self::RawAlloc), StorageError> {
+        let (ptr, alloc) = self.try_alloc_in(layout)?;
+        unsafe { ptr::write_bytes(ptr.cast::<u8>().as_ptr(), 0, ptr.len()) };
+        Ok((ptr, alloc))
+    }
 }
 
 impl<A: RawAlloc> RawAllocIn for A {
@@ -53,6 +70,15 @@ impl<A: RawAlloc> RawAllocIn for A {
     #[inline]
     fn try_alloc_in(self, layout: Layout) -> Result<(NonNull<[u8]>, Self::RawAlloc), StorageError> {
         let data = self.try_alloc(layout)?;
+        Ok((data, self))
+    }
+
+    #[inline]
+    fn try_alloc_in_zeroed(
+        self,
+        layout: Layout,
+    ) -> Result<(NonNull<[u8]>, Self::RawAlloc), StorageError> {
+        let data = self.try_alloc_zeroed(layout)?;
         Ok((data, self))
     }
 }
@@ -71,6 +97,12 @@ impl<A: Allocator + fmt::Debug> RawAlloc for A {
     #[inline]
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
         self.allocate(layout).map_err(|_| StorageError::AllocError)
+    }
+
+    #[inline]
+    fn try_alloc_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
+        self.allocate_zeroed(layout)
+            .map_err(|_| StorageError::AllocError)
     }
 
     #[inline]
@@ -104,8 +136,8 @@ impl RawAlloc for Global {
 }
 
 #[cfg(not(feature = "alloc"))]
-// Stub implementation to allow Global as the default allocator type.
-// Because the type can't be created, errors will still be detected at compile time if used.
+// Stub implementation to allow Global as the default allocator type
+// even when the `alloc` feature is not enabled.
 impl RawAlloc for Global {
     fn try_alloc(&self, _layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
         unimplemented!();
@@ -144,10 +176,10 @@ pub trait AllocHandle: RawBuffer<RawData = <Self::Meta as AllocLayout>::Data> {
 
     fn is_empty_handle(&self) -> bool;
 
-    /// SAFETY: is_empty_buffer must return false
+    /// SAFETY: is_empty_handle must return false
     unsafe fn header(&self) -> &<Self::Meta as AllocLayout>::Header;
 
-    /// SAFETY: is_empty_buffer must return false
+    /// SAFETY: is_empty_handle must return false
     unsafe fn header_mut(&mut self) -> &mut <Self::Meta as AllocLayout>::Header;
 
     fn alloc_handle_in<A>(

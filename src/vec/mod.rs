@@ -291,6 +291,15 @@ impl<T, C: VecConfig> Vec<T, C> {
     }
 
     #[inline]
+    pub fn leak<'a>(self) -> &'a mut [T]
+    where
+        C: 'a,
+    {
+        let mut me = ManuallyDrop::new(self);
+        unsafe { slice::from_raw_parts_mut(me.as_mut_ptr(), me.len().to_usize()) }
+    }
+
+    #[inline]
     pub fn len(&self) -> C::Index {
         self.buffer.length()
     }
@@ -1173,6 +1182,51 @@ impl<T, C: VecConfigNew<T>, const N: usize> From<[T; N]> for Vec<T, C> {
     }
 }
 
+impl<C: VecConfigNew<u8>> From<&str> for Vec<u8, C> {
+    #[inline]
+    fn from(data: &str) -> Self {
+        Self::from_slice(data.as_bytes())
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<C> From<alloc::string::String> for Vec<u8, C>
+where
+    C: VecConfigAllocParts<u8, Alloc = Global, Index = usize>,
+{
+    #[inline]
+    fn from(string: alloc::string::String) -> Self {
+        string.into_bytes().into()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<C: VecConfigNew<u8>> From<&alloc::string::String> for Vec<u8, C> {
+    #[inline]
+    fn from(string: &alloc::string::String) -> Self {
+        string.as_bytes().into()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<C> From<alloc::ffi::CString> for Vec<u8, C>
+where
+    C: VecConfigAllocParts<u8, Alloc = Global, Index = usize>,
+{
+    #[inline]
+    fn from(string: alloc::ffi::CString) -> Self {
+        string.into_bytes().into()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<C: VecConfigNew<u8>> From<&alloc::ffi::CString> for Vec<u8, C> {
+    #[inline]
+    fn from(string: &alloc::ffi::CString) -> Self {
+        string.as_bytes().into()
+    }
+}
+
 impl<T, C: VecConfig> IntoIterator for Vec<T, C> {
     type Item = T;
     type IntoIter = IntoIter<C::Buffer<T>>;
@@ -1375,6 +1429,62 @@ where
     }
 }
 
+impl<T, C: VecConfig, const N: usize> TryFrom<Vec<T, C>> for [T; N] {
+    type Error = Vec<T, C>;
+
+    #[inline]
+    fn try_from(mut vec: Vec<T, C>) -> Result<Self, Self::Error> {
+        if vec.len().to_usize() != N {
+            return Err(vec);
+        }
+
+        unsafe { vec.set_len(C::Index::ZERO) };
+
+        let data = vec.as_ptr() as *const [T; N];
+        Ok(unsafe { data.read() })
+    }
+}
+
+impl<T, C: VecConfigAllocParts<T>, const N: usize> TryFrom<Vec<T, C>> for Box<[T; N], C::Alloc> {
+    type Error = Vec<T, C>;
+
+    #[inline]
+    fn try_from(vec: Vec<T, C>) -> Result<Self, Self::Error> {
+        if vec.len().to_usize() != N {
+            return Err(vec);
+        }
+
+        let boxed = vec.into_boxed_slice();
+        Ok(unsafe { Box::transmute(boxed) })
+    }
+}
+
+#[cfg(feature = "std")]
+impl<C: VecConfig> std::io::Write for Vec<u8, C> {
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self._try_reserve(buf.len(), false) {
+            Ok(_) => {
+                unsafe { self.extend_unchecked(buf) };
+                Ok(buf.len())
+            }
+            Err(StorageError::CapacityLimit) => {
+                // extend_within_capacity?
+                let spare = self.capacity().to_usize() - self.len().to_usize();
+                if spare > 0 {
+                    unsafe { self.extend_unchecked(&buf[..spare]) };
+                }
+                Ok(spare)
+            }
+            Err(err) => Err(std::io::Error::new(std::io::ErrorKind::Other, err)),
+        }
+    }
+}
+
 #[cfg(feature = "zeroize")]
 impl<T, C: crate::storage::RawAlloc> zeroize::Zeroize
     for Vec<T, crate::storage::ZeroizingAlloc<C>>
@@ -1391,15 +1501,8 @@ impl<T, C: crate::storage::RawAlloc> zeroize::ZeroizeOnDrop
 {
 }
 
-// FIXME
-// From<String>
 // From<CString>
-// From<&str>
-// TryFrom<Vec<T>> for [T; N]
-// io::Write
-// dedup_by_key
 // push_within_capacity
-// leak
 
 /// ```compile_fail,E0597
 /// use flex_alloc::{storage::byte_storage, vec::Vec};

@@ -3,7 +3,7 @@ name = "flex-alloc"
 version = "0.0.1"
 authors = ["Andrew Whitehead <cywolf@gmail.com>"]
 edition = "2021"
-description = "Flexibly allocated data types"
+description = "Data structures with extra flexible storage"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/andrewwhitehead/flex-alloc/"
@@ -11,7 +11,7 @@ categories = ["data-structures", "memory-management", "no-std"]
 keywords = ["vec", "zeroize"]
 
 [features]
-default = ["alloc", "zeroize"]
+default = ["alloc"]
 alloc = ["allocator-api2?/alloc", "zeroize?/alloc"]
 std = ["alloc", "allocator-api2?/std", "zeroize?/std"]
 allocator-api2 = ["dep:allocator-api2"]

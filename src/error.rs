@@ -41,7 +41,7 @@ impl From<LayoutError> for StorageError {
 #[cfg(feature = "std")]
 impl std::error::Error for StorageError {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct InsertionError<T> {
     pub(crate) error: StorageError,
     pub(crate) value: T,
@@ -68,6 +68,15 @@ impl<T> InsertionError<T> {
     #[inline(never)]
     pub fn panic(self) -> ! {
         panic!("{}: {}", self.as_str(), self.error.as_str());
+    }
+}
+
+impl<T> fmt::Debug for InsertionError<T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InsertionError")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
     }
 }
 

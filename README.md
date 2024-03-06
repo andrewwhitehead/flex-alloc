@@ -6,7 +6,9 @@ Both `no-std` as well as `no-alloc` environments are supported.
 
 ## Feature flags
 
-- With the `alloc` feature, access to the global allocator is enabled, and default constructors for allocated containers (such as `Vec::new`) are supported.
+- The `std` flag (off by default) enables compatibility with the `std::error::Error` trait for error types, adds `io::Write` support to `Vec`, and also enables the `alloc` feature.
+
+- With the `alloc` feature (on by default), access to the global allocator is enabled, and default constructors for allocated containers (such as `Vec::new`) are supported.
 
 - The `allocator-api2` feature enables integration with the `allocator-api2` crate, which offers support for the `allocator-api` feature set on stable Rust. This can allow for allocators implementing the API to be passed to `Box::new_in` and `Vec::new_in`.
 
