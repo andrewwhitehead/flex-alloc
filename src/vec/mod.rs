@@ -32,12 +32,16 @@ pub(crate) mod insert;
 mod into_iter;
 mod splice;
 
+/// A `Vec` which stores its contained data inline, using no external allocation.
 pub type InlineVec<T, const N: usize> = Vec<T, crate::storage::Inline<N>>;
 
 #[cfg(feature = "alloc")]
+/// A `Vec` which is pointer-sized, storing its capacity and length in the
+/// allocated buffer.
 pub type ThinVec<T> = Vec<T, crate::storage::Thin>;
 
 #[cfg(feature = "zeroize")]
+/// A `Vec` which automatically zeroizes its buffer when dropped.
 pub type ZeroizingVec<T> = Vec<T, crate::storage::ZeroizingAlloc<Global>>;
 
 #[cold]
@@ -47,7 +51,7 @@ pub(super) fn index_panic() -> ! {
 }
 
 #[inline]
-fn bounds<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
+fn bounds_to_range<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
     let start = match range.start_bound() {
         Bound::Unbounded => 0,
         Bound::Included(i) => i.to_usize(),
@@ -63,6 +67,7 @@ fn bounds<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usize> {
 
 #[cfg(feature = "alloc")]
 #[inline]
+/// Create a `Vec<T>` from an array `[T; N]`.
 pub fn from_array<T, const N: usize>(data: [T; N]) -> Vec<T> {
     let mut v = Vec::new();
     v.extend(data);
@@ -70,6 +75,7 @@ pub fn from_array<T, const N: usize>(data: [T; N]) -> Vec<T> {
 }
 
 #[inline]
+/// Create a `Vec<T, C>` from an array `[T; N]` and an instance of `VecNewIn<T>`.
 pub fn from_array_in<T, C, const N: usize>(data: [T; N], alloc_in: C) -> Vec<T, C::Config>
 where
     C: VecNewIn<T>,
@@ -81,11 +87,14 @@ where
 
 #[cfg(feature = "alloc")]
 #[inline]
+/// Create a `Vec<T>` from a cloneable element T and a count of the number of elements.
 pub fn from_elem<T: Clone>(elem: T, count: usize) -> Vec<T, Global> {
     Vec::from_iter(repeat(elem).take(count))
 }
 
 #[inline]
+/// Create a `Vec<T, C>` from a cloneable element T, a count of the number of elements,
+/// and an instance of `VecNewIn<T>`.
 pub fn from_elem_in<T, C>(elem: T, count: usize, alloc_in: C) -> Vec<T, C::Config>
 where
     T: Clone,
@@ -100,6 +109,17 @@ pub struct Vec<T, C: VecConfig = Global> {
 }
 
 impl<T, C: VecConfigNew<T>> Vec<T, C> {
+    /// Constructs a new, empty `Vec<T, C>`.
+    ///
+    /// The vector will not allocate until elements are pushed onto it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![allow(unused_mut)]
+    /// # #[cfg(feature = "alloc")]
+    /// let mut vec: Vec<i32> = Vec::new();
+    /// ```
     pub const fn new() -> Self {
         Self { buffer: C::NEW }
     }
@@ -428,7 +448,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     where
         R: RangeBounds<C::Index>,
     {
-        let range = bounds(range, self.buffer.length());
+        let range = bounds_to_range(range, self.buffer.length());
         Drain::new(&mut self.buffer, range)
     }
 
@@ -845,7 +865,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         R: RangeBounds<C::Index>,
         I: IntoIterator<Item = T>,
     {
-        let range = bounds(range, self.buffer.length());
+        let range = bounds_to_range(range, self.buffer.length());
         Splice::new(&mut self.buffer, replace_with.into_iter(), range)
     }
 
@@ -1006,20 +1026,10 @@ impl<T, C: VecConfigNew<T>> FromIterator<T> for Vec<T, C> {
 
 // This is intentionally simpler than the inferred bounds, C::VecBuffer<T>: Send.
 // If a particular VecBuffer is not 'Send' then the VecConfig type must reflect that.
-unsafe impl<T, C: VecConfig> Send for Vec<T, C>
-where
-    T: Send,
-    C: Send,
-{
-}
+unsafe impl<T: Send, C: VecConfig + Send> Send for Vec<T, C> {}
 
 // If a particular VecBuffer is not 'Sync' then the VecConfig type must reflect that.
-unsafe impl<T, C: VecConfig> Sync for Vec<T, C>
-where
-    T: Sync,
-    C: Sync,
-{
-}
+unsafe impl<T: Sync, C: VecConfig + Sync> Sync for Vec<T, C> {}
 
 impl<T, C: VecConfigAllocParts<T>> From<Box<[T], C::Alloc>> for Vec<T, C> {
     #[inline]
@@ -1044,12 +1054,14 @@ where
 }
 
 #[cfg(feature = "allocator-api2")]
-impl<T, C> From<allocator_api2::boxed::Box<[T]>> for Vec<T, C>
+impl<T, C, A> From<allocator_api2::boxed::Box<[T], A>> for Vec<T, C>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    A: allocator_api2::alloc::Allocator,
+    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
 {
-    fn from(vec: allocator_api2::boxed::Box<[T]>) -> Self {
-        allocator_api2::vec::Vec::<T>::from(vec).into()
+    #[inline]
+    fn from(vec: allocator_api2::boxed::Box<[T], A>) -> Self {
+        allocator_api2::vec::Vec::<T, A>::from(vec).into()
     }
 }
 
@@ -1058,18 +1070,21 @@ impl<T, C> From<Vec<T, C>> for alloc::boxed::Box<[T]>
 where
     C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
 {
+    #[inline]
     fn from(vec: Vec<T, C>) -> Self {
         alloc::vec::Vec::<T>::from(vec).into_boxed_slice()
     }
 }
 
 #[cfg(feature = "allocator-api2")]
-impl<T, C> From<Vec<T, C>> for allocator_api2::boxed::Box<[T]>
+impl<T, C, A> From<Vec<T, C>> for allocator_api2::boxed::Box<[T], A>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    A: allocator_api2::alloc::Allocator,
+    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
 {
+    #[inline]
     fn from(vec: Vec<T, C>) -> Self {
-        allocator_api2::vec::Vec::<T>::from(vec).into_boxed_slice()
+        allocator_api2::vec::Vec::<T, A>::from(vec).into_boxed_slice()
     }
 }
 
@@ -1087,15 +1102,15 @@ where
 }
 
 #[cfg(feature = "allocator-api2")]
-impl<T, C> From<allocator_api2::vec::Vec<T>> for Vec<T, C>
+impl<T, C, A> From<allocator_api2::vec::Vec<T, A>> for Vec<T, C>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    A: allocator_api2::alloc::Allocator,
+    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
 {
-    fn from(vec: allocator_api2::vec::Vec<T>) -> Self {
-        let capacity = vec.capacity();
-        let length = vec.len();
-        let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
-        unsafe { Self::from_parts(data, length, capacity, Global) }
+    #[inline]
+    fn from(vec: allocator_api2::vec::Vec<T, A>) -> Self {
+        let (data, length, capacity, alloc) = vec.into_raw_parts_with_alloc();
+        unsafe { Self::from_parts(NonNull::new_unchecked(data), length, capacity, alloc) }
     }
 }
 
@@ -1114,16 +1129,16 @@ where
 }
 
 #[cfg(feature = "allocator-api2")]
-impl<T, C> From<Vec<T, C>> for allocator_api2::vec::Vec<T>
+impl<T, C, A> From<Vec<T, C>> for allocator_api2::vec::Vec<T, A>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    A: allocator_api2::alloc::Allocator,
+    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
 {
     fn from(vec: Vec<T, C>) -> Self {
-        let mut buffer = ManuallyDrop::new(vec.into_inner());
-        let capacity = buffer.capacity();
-        let length = buffer.length();
-        let data = buffer.data_ptr_mut();
-        unsafe { allocator_api2::vec::Vec::from_raw_parts(data, length, capacity) }
+        let (data, length, capacity, alloc) = C::vec_into_parts(vec.into_inner());
+        unsafe {
+            allocator_api2::vec::Vec::from_raw_parts_in(data.as_ptr(), length, capacity, alloc)
+        }
     }
 }
 

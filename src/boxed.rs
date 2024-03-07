@@ -478,6 +478,40 @@ impl<T: ?Sized> From<alloc::boxed::Box<T>> for Box<T, Global> {
     }
 }
 
+// not allowed to be implemented for Box<T> due to orphan rules
+// #[cfg(feature = "alloc")]
+// impl<T: ?Sized> From<Box<T, Global>> for alloc::boxed::Box<T> {
+//     #[inline]
+//     fn from(boxed: Box<T, Global>) -> Self {
+//         let (ptr, alloc) = boxed.into_parts();
+//         unsafe { alloc::boxed::Box::from_raw(ptr) }
+//     }
+// }
+
+#[cfg(feature = "allocator-api2")]
+impl<T: ?Sized, A> From<allocator_api2::boxed::Box<T, A>> for Box<T, A>
+where
+    A: allocator_api2::alloc::Allocator,
+{
+    #[inline]
+    fn from(boxed: allocator_api2::boxed::Box<T, A>) -> Self {
+        let (ptr, alloc) = allocator_api2::boxed::Box::into_raw_with_allocator(boxed);
+        unsafe { Box::from_parts(NonNull::new_unchecked(ptr), alloc) }
+    }
+}
+
+#[cfg(feature = "allocator-api2")]
+impl<T: ?Sized, A> From<Box<T, A>> for allocator_api2::boxed::Box<T, A>
+where
+    A: allocator_api2::alloc::Allocator,
+{
+    #[inline]
+    fn from(boxed: Box<T, A>) -> Self {
+        let (ptr, alloc) = boxed.into_parts();
+        unsafe { allocator_api2::boxed::Box::from_raw_in(ptr.as_ptr(), alloc) }
+    }
+}
+
 // #[cfg(feature = "alloc")]
 // impl<T, S> From<alloc::vec::Vec<T>> for Box<[T], S>
 // where

@@ -36,3 +36,15 @@ pub const fn min_non_zero_cap<T>() -> usize {
         1
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_min_cap() {
+        assert_eq!(min_non_zero_cap::<u8>(), 8);
+        assert_eq!(min_non_zero_cap::<usize>(), 4);
+        assert_eq!(min_non_zero_cap::<[u8; 1025]>(), 1);
+    }
+}

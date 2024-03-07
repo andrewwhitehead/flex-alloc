@@ -17,7 +17,7 @@ use crate::error::StorageError;
 use super::utils::layout_aligned_bytes;
 use super::{ByteStorage, RawBuffer};
 
-pub trait RawAlloc: fmt::Debug {
+pub trait RawAlloc {
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError>;
 
     #[inline]
@@ -93,7 +93,7 @@ pub trait RawAllocNew: RawAlloc + Clone {
 pub struct Global;
 
 #[cfg(feature = "allocator-api2")]
-impl<A: Allocator + fmt::Debug> RawAlloc for A {
+impl<A: Allocator> RawAlloc for A {
     #[inline]
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
         self.allocate(layout).map_err(|_| StorageError::AllocError)

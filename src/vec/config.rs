@@ -15,7 +15,7 @@ use crate::storage::{
 
 use super::buffer::{VecBuffer, VecBufferNew, VecBufferSpawn, VecData, VecHeader};
 
-pub trait VecAlloc: Debug {
+pub trait VecAlloc {
     type RawAlloc: RawAlloc;
     type AllocHandle<T, I: Index>: AllocHandle<Alloc = Self::RawAlloc, Meta = VecData<T, I>>;
 }
@@ -25,7 +25,7 @@ impl<A: RawAlloc> VecAlloc for A {
     type AllocHandle<T, I: Index> = FatAllocHandle<VecData<T, I>, A>;
 }
 
-pub trait VecConfig: Debug {
+pub trait VecConfig {
     type Buffer<T>: VecBuffer<Data = T, Index = Self::Index>;
     type Grow: Grow;
     type Index: Index;
