@@ -1,0 +1,14 @@
+[package]
+name = "flex-alloc-bumpalo"
+version = "0.0.1"
+authors = ["Andrew Whitehead <cywolf@gmail.com>"]
+edition = "2021"
+description = "Bumpalo example"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/andrewwhitehead/flex-alloc/"
+rust-version = "1.74"
+
+[dependencies]
+flex-alloc = { path = "../..", features = ["allocator-api2"] }
+bumpalo = { version = "3", features = ["allocator-api2"] }
