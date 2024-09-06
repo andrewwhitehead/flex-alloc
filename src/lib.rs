@@ -43,16 +43,8 @@
 //!
 //! Integration with `zeroize` is implemented at the allocator level in order
 //! to ensure that all buffers are zeroized (including intermediate
-//! allocations produced when a `Vec` is resized). This means that `Box` and
-//! `Vec` will implement `Zeroize` and `ZeroizeOnDrop` when appropriate.
-//!
-//! ```
-//! # #[cfg(feature = "zeroize")] {
-//! use flex_alloc::boxed::ZeroizingBox;
-//!
-//! let b = ZeroizingBox::new(99usize);
-//! # }
-//! ```
+//! allocations produced when a `Vec` is resized). This means that `Vec` types
+//! will implement `Zeroize` and `ZeroizeOnDrop` when appropriate.
 //!
 //! ```
 //! # #[cfg(feature = "zeroize")] {

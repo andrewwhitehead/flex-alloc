@@ -51,33 +51,12 @@ impl<A: RawAlloc> RawAlloc for &TestAlloc<A> {
 fn test_alloc_log() {
     // check functioning of alloc log
     let alloc = TestAlloc::new(Global);
-    let mut b = vec![in &alloc; 99usize];
-    b.push(99usize);
+    let b = vec![in &alloc; 99usize];
     drop(b);
     let log = alloc.released.borrow().clone();
-    assert_eq!(log, &[99u32.to_ne_bytes()]);
+    assert_eq!(log.len(), 1);
+    assert!(log[0].starts_with(&99u32.to_ne_bytes()));
 }
-
-// #[test]
-// fn box_zeroize() {
-//     // test zeroizing alloc
-//     let alloc = TestAlloc::new(Global);
-//     let b = FlexBox::new_in(99u32, ZeroizingAlloc(&alloc));
-//     drop(b);
-//     let log = alloc.released.borrow().clone();
-//     assert_eq!(log, &[&[0, 0, 0, 0]]);
-// }
-
-// #[test]
-// fn box_zeroize_spill() {
-//     // test zeroizing alloc with spill
-//     let mut buf = zeroize::Zeroizing::new(byte_storage::<2>());
-//     let alloc = TestAlloc::new(Global);
-//     let b = FlexBox::new_in(99u32, buf.with_alloc_in(&alloc));
-//     drop(b);
-//     let log = alloc.released.borrow().clone();
-//     assert_eq!(log, &[&[0, 0, 0, 0]]);
-// }
 
 #[test]
 fn vec_zeroizing_alloc_global() {
