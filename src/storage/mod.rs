@@ -43,6 +43,12 @@ impl<A> ArrayStorage<A> {
     }
 }
 
+impl<T, const N: usize> ArrayStorage<[MaybeUninit<T>; N]> {
+    pub fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<T>] {
+        &mut self.0
+    }
+}
+
 #[repr(C)]
 pub union ByteStorage<T, const N: usize> {
     _align: [ManuallyDrop<T>; 0],
@@ -56,7 +62,7 @@ impl<T, const N: usize> ByteStorage<T, N> {
         }
     }
 
-    pub(crate) fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<u8>] {
+    pub fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<u8>] {
         unsafe { &mut self.data }
     }
 }

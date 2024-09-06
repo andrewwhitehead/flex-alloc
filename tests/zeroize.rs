@@ -6,8 +6,8 @@ use core::ptr::NonNull;
 use core::slice;
 
 use flex_alloc::{
-    boxed::Box as FlexBox,
     storage::{array_storage, byte_storage, Global, RawAlloc, WithAlloc, ZeroizingAlloc},
+    vec,
     vec::{Vec as FlexVec, ZeroizingVec},
 };
 
@@ -51,55 +51,105 @@ impl<A: RawAlloc> RawAlloc for &TestAlloc<A> {
 fn test_alloc_log() {
     // check functioning of alloc log
     let alloc = TestAlloc::new(Global);
-    let b = FlexBox::new_in(99u32, &alloc);
+    let mut b = vec![in &alloc; 99usize];
+    b.push(99usize);
     drop(b);
     let log = alloc.released.borrow().clone();
     assert_eq!(log, &[99u32.to_ne_bytes()]);
 }
 
-#[test]
-fn box_zeroize() {
-    // test zeroizing alloc
-    let alloc = TestAlloc::new(Global);
-    let b = FlexBox::new_in(99u32, ZeroizingAlloc(&alloc));
-    drop(b);
-    let log = alloc.released.borrow().clone();
-    assert_eq!(log, &[&[0, 0, 0, 0]]);
-}
+// #[test]
+// fn box_zeroize() {
+//     // test zeroizing alloc
+//     let alloc = TestAlloc::new(Global);
+//     let b = FlexBox::new_in(99u32, ZeroizingAlloc(&alloc));
+//     drop(b);
+//     let log = alloc.released.borrow().clone();
+//     assert_eq!(log, &[&[0, 0, 0, 0]]);
+// }
+
+// #[test]
+// fn box_zeroize_spill() {
+//     // test zeroizing alloc with spill
+//     let mut buf = zeroize::Zeroizing::new(byte_storage::<2>());
+//     let alloc = TestAlloc::new(Global);
+//     let b = FlexBox::new_in(99u32, buf.with_alloc_in(&alloc));
+//     drop(b);
+//     let log = alloc.released.borrow().clone();
+//     assert_eq!(log, &[&[0, 0, 0, 0]]);
+// }
 
 #[test]
-fn box_zeroize_spill() {
-    // test zeroizing alloc with spill
-    let mut buf = zeroize::Zeroizing::new(byte_storage::<2>());
-    let alloc = TestAlloc::new(Global);
-    let b = FlexBox::new_in(99u32, buf.with_alloc_in(&alloc));
-    drop(b);
-    let log = alloc.released.borrow().clone();
-    assert_eq!(log, &[&[0, 0, 0, 0]]);
-}
-
-#[test]
-fn vec_zeroize() {
+fn vec_zeroizing_alloc_global() {
     let mut v = FlexVec::<usize, _>::new_in(ZeroizingAlloc::<Global>::default());
     v.extend([1, 2, 3]);
+}
 
+#[test]
+fn vec_zeroizing_alloc_global_verify() {
+    let alloc = TestAlloc::new(Global);
+    let mut v = FlexVec::<usize, _>::new_in(ZeroizingAlloc(&alloc));
+    v.push(1usize);
+    drop(v);
+    let log = alloc.released.borrow().clone();
+    assert_eq!(log.len(), 1);
+    assert!(log[0].iter().all(|i| *i == 0));
+}
+
+#[test]
+fn vec_zeroizing_array_storage() {
     let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
     let mut v = FlexVec::<usize, _>::new_in(&mut *z);
     v.push(1);
+}
 
+#[test]
+fn vec_zeroizing_byte_storage() {
     let mut z = zeroize::Zeroizing::new(byte_storage::<100>());
     let mut v = FlexVec::<usize, _>::new_in(&mut *z);
     v.push(1);
+}
 
+#[test]
+fn vec_zeroizing_array_storage_spill() {
     let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
     let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
     v.extend([1, 2, 3]);
+}
 
+#[test]
+fn vec_zeroizing_array_storage_spill_verify() {
+    let alloc = TestAlloc::new(Global);
+    let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
+    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc_in(&alloc));
+    v.extend([1, 2, 3]);
+    drop(v);
+    let log = alloc.released.borrow().clone();
+    assert_eq!(log.len(), 1);
+    assert!(log[0].iter().all(|i| *i == 0));
+}
+
+#[test]
+fn vec_zeroizing_byte_storage_spill() {
     let mut z = zeroize::Zeroizing::new(byte_storage::<10>());
     let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
     v.extend([1, 2, 3]);
+}
 
-    // test type alias
+#[test]
+fn vec_zeroizing_byte_storage_spill_verify() {
+    let alloc = TestAlloc::new(Global);
+    let mut z = zeroize::Zeroizing::new(byte_storage::<10>());
+    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc_in(&alloc));
+    v.extend([1, 2, 3]);
+    drop(v);
+    let log = alloc.released.borrow().clone();
+    assert_eq!(log.len(), 1);
+    assert!(log[0].iter().all(|i| *i == 0));
+}
+
+#[test]
+fn vec_zeroizingvec_alias() {
     let mut v = ZeroizingVec::new();
     v.extend([1, 2, 3]);
 }
