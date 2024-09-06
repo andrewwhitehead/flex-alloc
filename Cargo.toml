@@ -31,7 +31,7 @@ criterion = { version = "0.5", default-features = false, features = [
     "html_reports",
 ] }
 rand = "0.8"
-rstest = "0.18"
+rstest = "0.22"
 
 [[bench]]
 name = "compare_vec"
