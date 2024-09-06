@@ -45,22 +45,6 @@ impl<'a, T> Inserter<'a, T> {
     }
 
     #[inline]
-    pub fn for_mut_slice(buf: &'a mut [MaybeUninit<T>]) -> Self {
-        let cap = buf.len();
-        unsafe { Self::new(buf.as_mut_ptr().cast(), cap, 0, 0) }
-    }
-
-    #[inline]
-    pub fn extend_from_slice(&mut self, data: &[T])
-    where
-        T: Clone,
-    {
-        for item in data {
-            self.push_clone(item);
-        }
-    }
-
-    #[inline]
     pub fn push(&mut self, val: T) {
         self.buf[self.end].write(val);
         self.end += 1;

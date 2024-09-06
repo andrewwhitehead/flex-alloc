@@ -10,5 +10,6 @@ repository = "https://github.com/andrewwhitehead/flex-alloc/"
 rust-version = "1.74"
 
 [dependencies]
+allocator-api2 = { version = "0.2", default-features = false }
 flex-alloc = { path = "../..", features = ["allocator-api2"] }
 bumpalo = { version = "3", features = ["allocator-api2"] }

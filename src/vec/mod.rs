@@ -4,10 +4,9 @@ use core::fmt;
 use core::iter::repeat;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
-use core::ptr::{self, NonNull};
+use core::ptr::{self, slice_from_raw_parts_mut, NonNull};
 use core::slice;
 
-use crate::boxed::Box;
 use crate::error::{InsertionError, StorageError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
@@ -241,21 +240,29 @@ impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
     }
 }
 
-impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
-    pub fn into_boxed_slice(mut self) -> Box<[T], C::Alloc> {
+#[cfg(feature = "alloc")]
+impl<T, C> Vec<T, C>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    pub fn into_boxed_slice(mut self) -> alloc::boxed::Box<[T]> {
         self.shrink_to_fit();
-        let (data, length, capacity, alloc) = self.into_parts();
+        let (data, length, capacity, _alloc) = self.into_parts();
         assert_eq!(capacity, length);
-        unsafe { Box::slice_from_parts(data, alloc, length.to_usize()) }
+        let data = slice_from_raw_parts_mut(data.as_ptr(), length);
+        unsafe { alloc::boxed::Box::from_raw(data) }
     }
 
-    pub fn try_into_boxed_slice(mut self) -> Result<Box<[T], C::Alloc>, StorageError> {
+    pub fn try_into_boxed_slice(mut self) -> Result<alloc::boxed::Box<[T]>, StorageError> {
         self.try_shrink_to_fit()?;
-        let (data, length, capacity, alloc) = self.into_parts();
+        let (data, length, capacity, _alloc) = self.into_parts();
         assert_eq!(capacity, length);
-        Ok(unsafe { Box::slice_from_parts(data, alloc, length.to_usize()) })
+        let data = slice_from_raw_parts_mut(data.as_ptr(), length);
+        Ok(unsafe { alloc::boxed::Box::from_raw(data) })
     }
+}
 
+impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
     #[inline]
     pub(crate) fn into_parts(self) -> (NonNull<T>, C::Index, C::Index, C::Alloc) {
         C::vec_into_parts(self.into_inner())
@@ -1031,17 +1038,6 @@ unsafe impl<T: Send, C: VecConfig + Send> Send for Vec<T, C> {}
 // If a particular VecBuffer is not 'Sync' then the VecConfig type must reflect that.
 unsafe impl<T: Sync, C: VecConfig + Sync> Sync for Vec<T, C> {}
 
-impl<T, C: VecConfigAllocParts<T>> From<Box<[T], C::Alloc>> for Vec<T, C> {
-    #[inline]
-    fn from(boxed: Box<[T], C::Alloc>) -> Self {
-        let (ptr, alloc) = Box::into_parts(boxed);
-        let Some(length) = C::Index::try_from_usize(ptr.len()) else {
-            index_panic();
-        };
-        unsafe { Self::from_parts(ptr.cast(), length, length, alloc) }
-    }
-}
-
 #[cfg(feature = "alloc")]
 impl<T, C> From<alloc::boxed::Box<[T]>> for Vec<T, C>
 where
@@ -1460,7 +1456,11 @@ impl<T, C: VecConfig, const N: usize> TryFrom<Vec<T, C>> for [T; N] {
     }
 }
 
-impl<T, C: VecConfigAllocParts<T>, const N: usize> TryFrom<Vec<T, C>> for Box<[T; N], C::Alloc> {
+#[cfg(feature = "alloc")]
+impl<T, C, const N: usize> TryFrom<Vec<T, C>> for alloc::boxed::Box<[T; N]>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
     type Error = Vec<T, C>;
 
     #[inline]
@@ -1469,8 +1469,29 @@ impl<T, C: VecConfigAllocParts<T>, const N: usize> TryFrom<Vec<T, C>> for Box<[T
             return Err(vec);
         }
 
-        let boxed = vec.into_boxed_slice();
-        Ok(unsafe { Box::transmute(boxed) })
+        let (data, length, capacity, _alloc) = vec.into_parts();
+        assert_eq!(capacity, length);
+        Ok(unsafe { alloc::boxed::Box::from_raw(data.as_ptr().cast()) })
+    }
+}
+
+#[cfg(feature = "allocator-api2")]
+impl<T, C, A, const N: usize> TryFrom<Vec<T, C>> for allocator_api2::boxed::Box<[T; N], A>
+where
+    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
+    A: allocator_api2::alloc::Allocator,
+{
+    type Error = Vec<T, C>;
+
+    #[inline]
+    fn try_from(vec: Vec<T, C>) -> Result<Self, Self::Error> {
+        if vec.len().to_usize() != N {
+            return Err(vec);
+        }
+
+        let (data, length, capacity, alloc) = vec.into_parts();
+        assert_eq!(capacity, length);
+        Ok(unsafe { allocator_api2::boxed::Box::from_raw_in(data.as_ptr().cast(), alloc) })
     }
 }
 

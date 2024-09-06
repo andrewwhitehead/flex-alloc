@@ -1,6 +1,6 @@
+use allocator_api2::boxed::Box;
 use bumpalo::Bump;
 use flex_alloc::{
-    boxed::Box,
     storage::{array_storage, WithAlloc},
     vec::Vec,
 };
@@ -11,7 +11,7 @@ fn main() {
     vec.push(83u32);
     assert_eq!(vec, &[83]);
 
-    let boxed: Box<[u32], &Bump> = vec.into_boxed_slice();
+    let boxed: Box<[u32], &Bump> = vec.into();
     assert_eq!(&*boxed, &[83]);
 
     let mut buf = array_storage::<u32, 10>();

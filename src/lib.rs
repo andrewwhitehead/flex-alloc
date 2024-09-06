@@ -4,14 +4,15 @@
 //!
 //! ## Fixed storage
 //!
-//! Containers may be allocated in fixed storage, a buffer which might be
+//! Vectors may be allocated in fixed storage, a buffer which might be
 //! stored on the stack or statically.
 //!
 //! ```
-//! use flex_alloc::{boxed::Box, storage::byte_storage};
+//! use flex_alloc::{storage::byte_storage, vec::Vec};
 //!
 //! let mut buf = byte_storage::<1024>();
-//! let b = Box::new_in(22usize, &mut buf);
+//! let mut b = Vec::new_in(&mut buf);
+//! b.push(22usize);
 //! ```
 //!
 //! A fixed storage buffer may also be chained to an allocator, meaning that
@@ -140,8 +141,6 @@ extern crate std;
 extern crate alloc;
 
 pub mod borrow;
-
-pub mod boxed;
 
 pub(crate) mod error;
 

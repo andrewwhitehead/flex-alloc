@@ -16,7 +16,6 @@ use flex_alloc::{
 
 #[cfg(feature = "alloc")]
 use flex_alloc::{
-    boxed::Box as FlexBox,
     storage::{Global, Thin, WithAlloc},
     vec,
     vec::{config::Custom, ThinVec},
@@ -470,7 +469,7 @@ fn vec_into_std_vec() {
 #[test]
 fn vec_into_boxed_slice() {
     let vec = FlexVec::<_>::from_slice(SLICE);
-    let boxed: FlexBox<_> = vec.into();
+    let boxed: Box<_> = vec.into();
     assert_eq!(&*boxed, SLICE);
     let vec = FlexVec::<_>::from(boxed);
     assert_eq!(&vec, SLICE);
