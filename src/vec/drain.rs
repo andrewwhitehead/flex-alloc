@@ -54,6 +54,10 @@ impl<'d, B: VecBuffer> Drain<'d, B> {
         }
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub const fn len(&self) -> usize {
         self.remain.end - self.remain.start
     }

@@ -34,6 +34,10 @@ where
         }
     }
 
+    pub const fn is_empty(&self) -> bool {
+        self.drain.is_empty()
+    }
+
     pub const fn len(&self) -> usize {
         self.drain.len()
     }

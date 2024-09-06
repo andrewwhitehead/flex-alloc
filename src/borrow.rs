@@ -9,13 +9,6 @@ use crate::{error::StorageError, storage::RawAllocNew};
 
 pub type Owned<B, A> = <B as ToOwnedIn<A>>::Owned;
 
-// #[cfg(feature = "alloc")]
-// pub type AllocCow<'b, T> = Cow<'b, T, Global>;
-
-// pub type FlexCow<'b, T> = Cow<'b, T, Flex<'b>>;
-
-// pub type RefCow<'b, T> = Cow<'b, T, Fixed<'b>>;
-
 pub trait ToOwnedIn<A: RawAlloc> {
     type Owned: Borrow<Self>;
 
@@ -81,7 +74,7 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
         }
     }
 
-    // FIXME to_mut_in?
+    // TODO to_mut_in?
 
     pub fn into_owned(self) -> Owned<T, A>
     where
@@ -132,7 +125,7 @@ impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> AsRef<T> for Cow<'_, T, A> {
 
 impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Borrow<T> for Cow<'_, T, A> {
     fn borrow(&self) -> &T {
-        &**self
+        self
     }
 }
 
@@ -149,7 +142,7 @@ where
 
     fn clone_from(&mut self, source: &Self) {
         match (self, source) {
-            (&mut Self::Owned(ref mut dest), &Self::Owned(ref o)) => dest.clone_from(o),
+            (&mut Self::Owned(ref mut dest), Self::Owned(ref o)) => dest.clone_from(o),
             (t, s) => *t = s.clone(),
         }
     }
@@ -223,8 +216,8 @@ where
 {
     #[inline]
     fn eq(&self, other: &Cow<'b, U, B>) -> bool {
-        (&**self).eq(&**other)
+        self.deref().eq(other.deref())
     }
 }
 
-impl<'a, 'b, T: ToOwnedIn<A> + Eq + ?Sized, A: RawAlloc> Eq for Cow<'a, T, A> {}
+impl<'a, T: ToOwnedIn<A> + Eq + ?Sized, A: RawAlloc> Eq for Cow<'a, T, A> {}

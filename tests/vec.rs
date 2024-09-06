@@ -24,7 +24,7 @@ use flex_alloc::{
 const SLICE: &[usize] = &[1, 2, 3, 4, 5];
 
 #[derive(Default, Copy, Clone)]
-struct ZST;
+struct Zst;
 
 #[rstest]
 #[cfg_attr(feature="alloc", case::global(Cfg::<Global>))]
@@ -92,9 +92,9 @@ fn vec_with_capacity_in_push<C: VecNewIn<usize>>(#[case] buf: C) {
 #[cfg_attr(feature="alloc", case::thin(Cfg::<Thin>))]
 #[cfg_attr(feature="alloc", case::custom(Cfg::<Custom<Global, u8>>))]
 #[case::inline(Cfg::<Inline<10>>)]
-fn vec_with_capacity_push_zst<C: VecConfigNew<ZST>>(#[case] _config: Cfg<C>) {
-    let mut v = FlexVec::<ZST, C>::with_capacity(C::Index::from_usize(10));
-    v.push(ZST);
+fn vec_with_capacity_push_zst<C: VecConfigNew<Zst>>(#[case] _config: Cfg<C>) {
+    let mut v = FlexVec::<Zst, C>::with_capacity(C::Index::from_usize(10));
+    v.push(Zst);
     assert_eq!(v.len().to_usize(), 1);
 }
 
@@ -302,7 +302,7 @@ fn vec_into_iter_skip<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 #[cfg_attr(feature="alloc", case::custom(Cfg::<Custom<Global, u8>>))]
 #[case::inline(Cfg::<Inline<10>>)]
 fn vec_into_iter_collect<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
-    let v: FlexVec<usize, C> = (0..5).into_iter().collect();
+    let v: FlexVec<usize, C> = (0..5).collect();
     assert_eq!(v, &[0, 1, 2, 3, 4]);
 }
 
@@ -400,7 +400,7 @@ fn vec_extend_large_global() {
     let count = 1000000;
     b.extend(0..count);
     for i in 0..count {
-        assert_eq!(b[i as usize], i);
+        assert_eq!(b[i], i);
     }
 }
 

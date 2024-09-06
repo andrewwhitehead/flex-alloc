@@ -37,7 +37,7 @@ fn standard_compare(c: &mut Criterion) {
             &format!("flexvec global with_capacity({0}) push {0} values", count),
             |b| {
                 b.iter(|| {
-                    let mut vec = FlexVec::<usize>::with_capacity(count as usize);
+                    let mut vec = FlexVec::<usize>::with_capacity(count);
                     for value in 0..count {
                         vec.push(black_box(value));
                     }
@@ -49,7 +49,7 @@ fn standard_compare(c: &mut Criterion) {
             &format!("flexvec thin with_capacity({0}) push {0} values", count),
             |b| {
                 b.iter(|| {
-                    let mut vec = FlexVec::<usize, Thin>::with_capacity(count as usize);
+                    let mut vec = FlexVec::<usize, Thin>::with_capacity(count);
                     for value in 0..count {
                         vec.push(black_box(value));
                     }
@@ -122,7 +122,7 @@ fn standard_compare(c: &mut Criterion) {
             &format!("stdvec with_capacity({0}) push {0} values", count),
             |b| {
                 b.iter(|| {
-                    let mut vec = Vec::<usize>::with_capacity(count as usize);
+                    let mut vec = Vec::<usize>::with_capacity(count);
                     for value in 0..count {
                         vec.push(black_box(value));
                     }

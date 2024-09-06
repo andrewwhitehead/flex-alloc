@@ -59,6 +59,7 @@ pub trait VecBuffer: RawBuffer<RawData = Self::Data> {
 
     fn length(&self) -> Self::Index;
 
+    /// # Safety
     /// The capacity of the buffer must be established as greater than zero,
     /// otherwise this method may attempt to write into unallocated memory.
     unsafe fn set_length(&mut self, len: Self::Index);
@@ -86,7 +87,7 @@ pub trait VecBuffer: RawBuffer<RawData = Self::Data> {
     fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError>;
 }
 
-impl<'a, B, T, I: Index> VecBuffer for B
+impl<B, T, I: Index> VecBuffer for B
 where
     B: AllocHandle<Meta = VecData<T, I>>,
 {
@@ -153,7 +154,7 @@ pub trait VecBufferSpawn: VecBuffer {
     fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
 }
 
-impl<'a, B, T, I: Index> VecBufferSpawn for B
+impl<B, T, I: Index> VecBufferSpawn for B
 where
     B: AllocHandle<Meta = VecData<T, I>>,
     B::Alloc: Clone,
@@ -212,7 +213,7 @@ impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
     }
 }
 
-impl<'a, T, const N: usize> VecBufferSpawn for InlineBuffer<T, N> {
+impl<T, const N: usize> VecBufferSpawn for InlineBuffer<T, N> {
     #[inline]
     fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
         Self::vec_try_new(capacity, exact)

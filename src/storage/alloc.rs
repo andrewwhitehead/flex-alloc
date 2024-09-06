@@ -214,6 +214,12 @@ pub trait AllocHandleNew: AllocHandle {
     const NEW_ALLOC: Self::Alloc;
 }
 
+pub type AllocParts<Handle> = (
+    <<Handle as AllocHandle>::Meta as AllocLayout>::Header,
+    NonNull<<<Handle as AllocHandle>::Meta as AllocLayout>::Data>,
+    <Handle as AllocHandle>::Alloc,
+);
+
 pub trait AllocHandleParts: AllocHandle {
     fn handle_from_parts(
         header: <Self::Meta as AllocLayout>::Header,
@@ -221,13 +227,7 @@ pub trait AllocHandleParts: AllocHandle {
         alloc: Self::Alloc,
     ) -> Self;
 
-    fn handle_into_parts(
-        self,
-    ) -> (
-        <Self::Meta as AllocLayout>::Header,
-        NonNull<<Self::Meta as AllocLayout>::Data>,
-        Self::Alloc,
-    );
+    fn handle_into_parts(self) -> AllocParts<Self>;
 }
 
 #[derive(Debug)]

@@ -912,28 +912,28 @@ impl<T, C: VecConfig> Vec<T, C> {
 impl<T, C: VecConfig> AsRef<[T]> for Vec<T, C> {
     #[inline]
     fn as_ref(&self) -> &[T] {
-        &**self
+        self.as_slice()
     }
 }
 
 impl<T, C: VecConfig> AsMut<[T]> for Vec<T, C> {
     #[inline]
     fn as_mut(&mut self) -> &mut [T] {
-        &mut **self
+        self.as_mut_slice()
     }
 }
 
 impl<T, C: VecConfig> Borrow<[T]> for Vec<T, C> {
     #[inline]
     fn borrow(&self) -> &[T] {
-        &**self
+        self.as_slice()
     }
 }
 
 impl<T, C: VecConfig> BorrowMut<[T]> for Vec<T, C> {
     #[inline]
     fn borrow_mut(&mut self) -> &mut [T] {
-        &mut **self
+        self.as_mut_slice()
     }
 }
 
@@ -957,7 +957,7 @@ impl<T: Clone, C: VecConfigSpawn<T>> Clone for Vec<T, C> {
 
 impl<T: fmt::Debug, C: VecConfig> fmt::Debug for Vec<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (&**self).fmt(f)
+        self.as_slice().fmt(f)
     }
 }
 
@@ -1254,7 +1254,7 @@ impl<'a, T, C: VecConfig> IntoIterator for &'a Vec<T, C> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        self.as_slice().into_iter()
+        self.as_slice().iter()
     }
 }
 
@@ -1264,7 +1264,7 @@ impl<'a, T, C: VecConfig> IntoIterator for &'a mut Vec<T, C> {
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        self.as_mut_slice().into_iter()
+        self.as_mut_slice().iter_mut()
     }
 }
 
@@ -1276,7 +1276,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &Vec<T2, C2>) -> bool {
-        (&**self).eq(&**other)
+        self.as_slice().eq(other.as_slice())
     }
 }
 
@@ -1289,7 +1289,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &&[T2]) -> bool {
-        (&**self).eq(*other)
+        self.as_slice().eq(*other)
     }
 }
 
@@ -1300,7 +1300,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &&mut [T2]) -> bool {
-        (&**self).eq(*other)
+        self.as_slice().eq(*other)
     }
 }
 
@@ -1311,7 +1311,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &[T2]) -> bool {
-        (&**self).eq(other)
+        self.as_slice().eq(other)
     }
 }
 
@@ -1322,7 +1322,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &&[T2; N]) -> bool {
-        (&**self).eq(&other[..])
+        self.as_slice().eq(&other[..])
     }
 }
 
@@ -1333,7 +1333,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &&mut [T2; N]) -> bool {
-        (&**self).eq(&other[..])
+        self.as_slice().eq(&other[..])
     }
 }
 
@@ -1344,7 +1344,7 @@ where
 {
     #[inline]
     fn eq(&self, other: &[T2; N]) -> bool {
-        (&**self).eq(&other[..])
+        self.as_slice().eq(&other[..])
     }
 }
 
