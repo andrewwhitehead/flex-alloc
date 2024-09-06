@@ -404,16 +404,16 @@ fn vec_extend_large_global() {
     }
 }
 
-// #[cfg(feature = "alloc")]
-// #[test]
-// fn vec_splice_compat() {
-//     let mut v = Vec::<u32>::from_iter(0..10);
-//     let mut splice = v.splice(1..5, [11, 12, 13, 14, 15]);
-//     assert_eq!(splice.next(), Some(1));
-//     assert_eq!(splice.next_back(), Some(4));
-//     drop(splice);
-//     assert_eq!(&v[..], &[0, 11, 12, 13, 14, 15, 5, 6, 7, 8, 9])
-// }
+#[cfg(feature = "alloc")]
+#[test]
+fn vec_splice_compat() {
+    let mut v = Vec::<u32>::from_iter(0..10);
+    let mut splice = v.splice(1..5, [11, 12, 13, 14, 15]);
+    assert_eq!(splice.next(), Some(1));
+    assert_eq!(splice.next_back(), Some(4));
+    drop(splice);
+    assert_eq!(&v[..], &[0, 11, 12, 13, 14, 15, 5, 6, 7, 8, 9])
+}
 
 #[cfg(feature = "alloc")]
 #[test]
@@ -449,7 +449,7 @@ fn vec_zst() {
 
 #[cfg(feature = "allocator-api2")]
 #[test]
-fn vec_into_allocator_api_vec() {
+fn vec_into_allocator_api2_vec() {
     let mut b = FlexVec::<usize>::with_capacity(10);
     b.insert_slice(0, &[1, 2, 3, 4]);
     let vec = allocator_api2::vec::Vec::<usize>::from(b);
@@ -480,7 +480,7 @@ fn vec_into_boxed_slice() {
 
 #[cfg(feature = "allocator-api2")]
 #[test]
-fn vec_into_allocator_api_boxed_slice() {
+fn vec_into_allocator_api2_boxed_slice() {
     let vec = FlexVec::<_>::from_slice(SLICE);
     let boxed: allocator_api2::boxed::Box<_> = vec.into();
     assert_eq!(&*boxed, SLICE);
