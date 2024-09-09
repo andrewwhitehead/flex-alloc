@@ -1,3 +1,5 @@
+//! Support for flexibility over owned or borrowed collections.
+
 use core::{
     borrow::Borrow,
     fmt::{self, Debug, Display},

@@ -1,7 +1,10 @@
+//! Types used to specify indexes, ranges, lengths, and capacities of collections.
+
 use core::fmt::{Debug, Display};
 
 use crate::storage::utils::min_non_zero_cap;
 
+/// Types which may be used to index and define the length and capacity of collections.
 pub trait Index:
     Copy
     + Clone
@@ -17,22 +20,31 @@ pub trait Index:
     + Sized
     + 'static
 {
+    /// The zero value
     const ZERO: Self;
+    /// The maximum representable value of this type as a `usize`
     const MAX_USIZE: usize;
 
+    /// Create an instance of this type from a usize, panicking if
+    /// the bounds are exceeded
     fn from_usize(val: usize) -> Self;
 
+    /// Try to create an instance of this type from a usize
     fn try_from_usize(val: usize) -> Option<Self>;
 
+    /// Convert this instance into a `usize`
     #[inline]
     fn to_usize(self) -> usize {
         self.into()
     }
 
+    /// Add a `usize` without exceeding the bounds of this type
     fn saturating_add(self, val: usize) -> Self;
 
+    /// Subtract a `usize` without exceeding the bounds of this type
     fn saturating_sub(self, val: usize) -> Self;
 
+    /// Multiply by a `usize` without exceeding the bounds of this type
     fn saturating_mul(self, val: usize) -> Self;
 }
 
@@ -98,10 +110,13 @@ impl Index for usize {
     }
 }
 
+/// Growth behavior for collections which have exceeded their available storage
 pub trait Grow: Debug {
+    /// Calculate the next capacity to request from the allocator
     fn next_capacity<T, I: Index>(prev: I, minimum: I) -> I;
 }
 
+/// Growth behavior which never requests extra capacity
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GrowExact;
 
@@ -112,6 +127,7 @@ impl Grow for GrowExact {
     }
 }
 
+/// Growth behavior which consistently doubles in size
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GrowDoubling;
 

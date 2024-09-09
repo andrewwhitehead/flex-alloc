@@ -8,6 +8,7 @@ use super::drain::Drain;
 use super::index_panic;
 use crate::index::{Grow, Index};
 
+/// A struct used to manage an active `splice` operation for a `Vec` instance
 pub struct Splice<'s, I, B, G>
 where
     I: Iterator,
@@ -34,10 +35,12 @@ where
         }
     }
 
+    /// Check if the segment to be removed has remaining items
     pub const fn is_empty(&self) -> bool {
         self.drain.is_empty()
     }
 
+    /// Get the number of remaining items in the segment to be removed
     pub const fn len(&self) -> usize {
         self.drain.len()
     }

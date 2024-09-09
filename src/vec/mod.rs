@@ -1,3 +1,6 @@
+//! Support for generic `Vec` structures containing a resizable, contiguous array
+//! of items.
+
 use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering;
 use core::fmt;
@@ -137,15 +140,14 @@ where
     Vec::from_iter_in(repeat(elem).take(count), alloc_in)
 }
 
+/// A structure containing a resizable, contiguous array of items
 #[repr(transparent)]
 pub struct Vec<T, C: VecConfig = Global> {
     buffer: C::Buffer<T>,
 }
 
 impl<T, C: VecConfigNew<T>> Vec<T, C> {
-    /// Constructs a new, empty `Vec<T, C>`.
-    ///
-    /// The vector will not allocate until elements are pushed onto it.
+    /// Construct a new, empty `Vec<T, C>`.
     ///
     /// # Examples
     ///
@@ -158,11 +160,15 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
         Self { buffer: C::NEW }
     }
 
+    /// Try to construct a new `Vec<T, C>` with a minimum capacity.
     pub fn try_with_capacity(capacity: C::Index) -> Result<Self, StorageError> {
         let buffer = C::vec_try_new(capacity, false)?;
         Ok(Self { buffer })
     }
 
+    /// Construct a new `Vec<T, C>` with a minimum capacity
+    ///
+    /// This method will panic on any storage errors.
     pub fn with_capacity(capacity: C::Index) -> Self {
         match Self::try_with_capacity(capacity) {
             Ok(res) => res,
@@ -170,6 +176,9 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
         }
     }
 
+    /// Construct a new `Vec<T, C>` and extend it by cloning the slice `data`.
+    ///
+    /// This method will panic on any storage errors.
     pub fn from_slice(data: &[T]) -> Self
     where
         T: Clone,
@@ -182,6 +191,7 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
         vec
     }
 
+    /// Try to construct a new `Vec<T, C>` and extend it by cloning the slice `data`.
     pub fn try_from_slice(data: &[T]) -> Result<Self, StorageError>
     where
         T: Clone,
@@ -196,6 +206,9 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
 }
 
 impl<T, C: VecConfig> Vec<T, C> {
+    /// Construct a new, empty `Vec<T, C>` in the allocation provider `alloc_in`.
+    ///
+    /// This method will panic on any storage errors.
     pub fn new_in<A>(alloc_in: A) -> Self
     where
         A: VecNewIn<T, Config = C>,
@@ -206,6 +219,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to construct a new, empty `Vec<T, C>` in the allocation provider `alloc_in`.
     pub fn try_new_in<A>(alloc_in: A) -> Result<Self, StorageError>
     where
         A: VecNewIn<T, Config = C>,
@@ -215,6 +229,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         })
     }
 
+    /// Construct a new, empty `Vec<T, C>` in the allocation provider `alloc_in`
+    /// with a minimum initial capacity `capacity`.
+    ///
+    /// This method will panic on any storage errors.
     pub fn with_capacity_in<A>(capacity: C::Index, alloc_in: A) -> Self
     where
         A: VecNewIn<T, Config = C>,
@@ -225,6 +243,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to construct a new, empty `Vec<T, C>` in the allocation provider
+    /// `alloc_in` with a minimum initial capacity `capacity`.
     pub fn try_with_capacity_in<A>(capacity: C::Index, alloc_in: A) -> Result<Self, StorageError>
     where
         A: VecNewIn<T, Config = C>,
@@ -234,6 +254,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         })
     }
 
+    /// Construct a new `Vec<T, C>` in the allocation provider `alloc_in`
+    /// and extend it by cloning the slice `data`.
+    ///
+    /// This method will panic on any storage errors.
     pub fn from_slice_in<A>(data: &[T], alloc_in: A) -> Self
     where
         T: Clone,
@@ -247,6 +271,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         vec
     }
 
+    /// Try to construct a new `Vec<T, C>` in the allocation provider `alloc_in`
+    /// and extend it by cloning the slice `data`.
     pub fn try_from_slice_in<A>(data: &[T], alloc_in: A) -> Result<Self, StorageError>
     where
         T: Clone,
@@ -270,6 +296,7 @@ impl<T, C: VecConfig> Vec<T, C> {
 }
 
 impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
+    /// Get a reference to the associated allocator instance
     pub fn allocator(&self) -> &C::Alloc {
         C::allocator(&self.buffer)
     }
@@ -280,6 +307,10 @@ impl<T, C> Vec<T, C>
 where
     C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
 {
+    /// Convert this instance into a `Box<[T]>`. This may produce a new allocation
+    /// if the length of the collection does not match its capacity.
+    ///
+    /// This method will panic on any storage errors.
     pub fn into_boxed_slice(mut self) -> alloc::boxed::Box<[T]> {
         self.shrink_to_fit();
         let (data, length, capacity, _alloc) = self.into_parts();
@@ -288,6 +319,8 @@ where
         unsafe { alloc::boxed::Box::from_raw(data) }
     }
 
+    /// Try to convert this instance into a `Box<[T]>`. This may produce a new allocation
+    /// if the length of the collection does not match its capacity.
     pub fn try_into_boxed_slice(mut self) -> Result<alloc::boxed::Box<[T]>, StorageError> {
         self.try_shrink_to_fit()?;
         let (data, length, capacity, _alloc) = self.into_parts();
@@ -318,36 +351,46 @@ impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
 }
 
 impl<T, C: VecConfig> Vec<T, C> {
+    /// Get a read pointer to the beginning of the data allocation. This may be a
+    /// dangling pointer if `T` is zero sized or the current capacity is zero.
     #[inline]
     pub fn as_ptr(&mut self) -> *const T {
         self.buffer.data_ptr()
     }
 
+    /// Get a mutable pointer to the beginning of the data allocation. This may be a
+    /// dangling pointer if `T` is zero sized or the current capacity is zero.
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut T {
         self.buffer.data_ptr_mut()
     }
 
+    /// Access the contained data as a slice reference.
     #[inline]
     pub fn as_slice(&self) -> &[T] {
         self.buffer.as_slice()
     }
 
+    /// Access the contained data as a mutable slice reference.
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         self.buffer.as_mut_slice()
     }
 
+    /// Get the current capacity of the collection. This represents the number
+    /// of items which can be contained without creating a new allocation.
     #[inline]
     pub fn capacity(&self) -> C::Index {
         self.buffer.capacity()
     }
 
+    /// Clear the collection, dropping any contained items.
     #[inline]
     pub fn clear(&mut self) {
         self.truncate(C::Index::ZERO);
     }
 
+    /// Determine if the current collection length is zero.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == C::Index::ZERO
@@ -362,20 +405,27 @@ impl<T, C: VecConfig> Vec<T, C> {
         unsafe { slice::from_raw_parts_mut(me.as_mut_ptr(), me.len().to_usize()) }
     }
 
+    /// Get the current length of the collection.
     #[inline]
     pub fn len(&self) -> C::Index {
         self.buffer.length()
     }
 
+    /// Override the length of the collection.
+    ///
     /// # Safety
     /// The length must not exceed the current buffer capacity. All entries
     /// in the range `0..length` must be properly initialized prior to
-    /// setting the length.
+    /// setting the length to avoid undefined behavior.
     #[inline]
     pub unsafe fn set_len(&mut self, length: C::Index) {
         self.buffer.set_length(length)
     }
 
+    /// Ensure that the collection has sufficient capacity for at least `reserve`
+    /// items. Additional capacity may be allocated.
+    ///
+    /// This method will panic on any storage errors.
     #[inline]
     pub fn reserve(&mut self, reserve: C::Index) {
         match self.try_reserve(reserve) {
@@ -384,6 +434,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to ensure that the collection has sufficient capacity for `reserve` items.
+    /// Additional capacity may be allocated.
     #[inline]
     pub fn try_reserve(&mut self, reserve: C::Index) -> Result<(), StorageError> {
         self._try_reserve(reserve.into(), false)
@@ -407,6 +459,9 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// Ensure that the collection has sufficient capacity for at least `reserve`
+    /// items. If additional capacity is required, then the capacity of the new
+    /// allocation will not exceed `reserve`.
     #[inline]
     pub fn reserve_exact(&mut self, reserve: C::Index) {
         match self.try_reserve_exact(reserve) {
@@ -415,11 +470,16 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to ensure that the collection has sufficient capacity for at least
+    /// `reserve` items. If additional capacity is required, then the capacity of the
+    /// new allocation will not exceed `reserve`.
     #[inline]
     pub fn try_reserve_exact(&mut self, reserve: C::Index) -> Result<(), StorageError> {
         self._try_reserve(reserve.into(), true)
     }
 
+    /// Append the contents of another `Vec` to this instance, removing
+    /// the items from `other` in the process.
     pub fn append(&mut self, other: &mut Self) {
         if self.is_empty() {
             mem::swap(&mut self.buffer, &mut other.buffer);

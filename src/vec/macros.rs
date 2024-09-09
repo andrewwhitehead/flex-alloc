@@ -1,3 +1,4 @@
+/// Allocate a new Vec instance with optional initial items
 #[macro_export]
 macro_rules! vec {
     (in $alloc:expr $(;)?) => (

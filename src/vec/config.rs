@@ -1,3 +1,5 @@
+//! `Vec` configuration types and trait definitions.
+
 use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;

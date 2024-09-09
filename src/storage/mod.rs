@@ -1,3 +1,5 @@
+//! Backing storage types for collections.
+
 use core::fmt;
 use core::mem::{ManuallyDrop, MaybeUninit};
 
@@ -8,9 +10,7 @@ pub(crate) mod utils;
 #[cfg(feature = "zeroize")]
 pub(crate) mod zero;
 
-pub use self::alloc::{
-    FixedAlloc, Global, RawAlloc, RawAllocIn, RawAllocNew, SpillAlloc, SpillStorage, Thin,
-};
+pub use self::alloc::{FixedAlloc, Global, RawAlloc, RawAllocIn, RawAllocNew, SpillStorage, Thin};
 
 #[cfg(feature = "zeroize")]
 pub use self::zero::ZeroizingAlloc;

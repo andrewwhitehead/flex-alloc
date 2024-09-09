@@ -1,15 +1,23 @@
+//! Error handling.
+
 use core::alloc::LayoutError;
 use core::fmt;
 
+/// An enumeration of error types raised by storage implementations
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
+    /// A memory allocation failed
     AllocError,
+    /// The limit of the current allocation was reached
     CapacityLimit,
+    /// The provided layout was not allocatable
     LayoutError(LayoutError),
+    /// The requested operation is not supported for this storage
     Unsupported,
 }
 
 impl StorageError {
+    /// Generic description of this error
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::AllocError => "Allocation error",
@@ -19,6 +27,7 @@ impl StorageError {
         }
     }
 
+    /// Generate a panic with this error as the reason
     #[cold]
     #[inline(never)]
     pub fn panic(self) -> ! {
@@ -41,6 +50,8 @@ impl From<LayoutError> for StorageError {
 #[cfg(feature = "std")]
 impl std::error::Error for StorageError {}
 
+/// An error raised by insertion operations when appropriate storage
+/// was not available. Includes the value that was to be inserted.
 #[derive(Clone)]
 pub struct InsertionError<T> {
     pub(crate) error: StorageError,
@@ -52,18 +63,22 @@ impl<T> InsertionError<T> {
         Self { error, value }
     }
 
+    /// Generic description of this error
     pub fn as_str(&self) -> &'static str {
         "Insertion error"
     }
 
+    /// Get a reference to the contained `StorageError`
     pub fn error(&self) -> &StorageError {
         &self.error
     }
 
+    /// Unwrap the inner value of this error
     pub fn into_value(self) -> T {
         self.value
     }
 
+    /// Generate a panic with this error as the reason
     #[cold]
     #[inline(never)]
     pub fn panic(self) -> ! {

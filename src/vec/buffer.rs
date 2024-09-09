@@ -1,3 +1,5 @@
+//! `Vec` buffer types and trait definitions.
+
 use core::alloc::Layout;
 use core::fmt::Debug;
 use core::marker::PhantomData;

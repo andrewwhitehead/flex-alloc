@@ -17,9 +17,14 @@ use crate::error::StorageError;
 use super::utils::layout_aligned_bytes;
 use super::{ByteStorage, RawBuffer};
 
+/// The low level trait implemented by all allocators
 pub trait RawAlloc {
+    /// Try to allocate a slice of memory within this allocator instance,
+    /// returning the new allocation
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError>;
 
+    /// Try to allocate a slice of memory within this allocator instance,
+    /// returning the new allocation. The memory will be initialized with zeroes.
     #[inline]
     fn try_alloc_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
         let ptr = self.try_alloc(layout)?;
@@ -27,6 +32,8 @@ pub trait RawAlloc {
         Ok(ptr)
     }
 
+    /// Try to resize an existing allocation.
+    ///
     /// # Safety
     /// The value `ptr` must represent an allocation produced by this allocator, otherwise
     /// a memory access error may occur. The value `old_layout` must correspond to the
@@ -37,7 +44,7 @@ pub trait RawAlloc {
         old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<[u8]>, StorageError> {
-        // Default implementation simply allocates and copies over the contents.
+        // This default implementation simply allocates and copies over the contents.
         // NB: not copying the entire previous buffer seems to defeat some automatic
         // optimization and results in much worse performance (on MacOS 14 at least).
         let new_ptr = self.try_alloc(new_layout)?;
@@ -49,6 +56,8 @@ pub trait RawAlloc {
         Ok(new_ptr)
     }
 
+    /// Release an allocation produced by this allocator.
+    ///
     /// # Safety
     /// The value `ptr` must represent an allocation produced by this allocator, otherwise
     /// a memory access error may occur. The value `old_layout` must correspond to the
@@ -56,11 +65,19 @@ pub trait RawAlloc {
     unsafe fn release(&self, ptr: NonNull<u8>, layout: Layout);
 }
 
+/// For all types which are an allocator or reference an allocator, enable their
+/// usage as a target for allocation
 pub trait RawAllocIn: Sized {
+    /// The type of the allocator instance
     type RawAlloc: RawAlloc;
 
+    /// Try to allocate a slice of a memory corresponding to `layout`, returning
+    /// the new allocation and the allocator instance
     fn try_alloc_in(self, layout: Layout) -> Result<(NonNull<[u8]>, Self::RawAlloc), StorageError>;
 
+    /// Try to allocate a slice of a memory corresponding to `layout`, returning
+    /// the new allocation and the allocator instance. The memory will be initialized
+    /// with zeroes.
     #[inline]
     fn try_alloc_in_zeroed(
         self,
@@ -91,7 +108,9 @@ impl<A: RawAlloc> RawAllocIn for A {
     }
 }
 
+/// A trait implemented by allocators supporting a constant initializer
 pub trait RawAllocNew: RawAlloc + Clone {
+    /// The constant initializer for this allocator
     const NEW: Self;
 }
 
@@ -618,6 +637,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> Drop for ThinAllocHandle<Meta, Alloc> {
     }
 }
 
+/// An allocator backed by a fixed storage buffer
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct FixedAlloc<'a>(PhantomData<&'a mut ()>);
 
@@ -711,6 +731,8 @@ impl<'a, A: RawAllocNew> RawAllocNew for SpillAlloc<'a, A> {
     const NEW: Self = Self::new(A::NEW, ptr::null());
 }
 
+/// An allocator which consumes the provided fixed storage before deferring to the
+/// contained `A` instance allocator for further allocations
 #[derive(Debug, Default, Clone)]
 pub struct SpillStorage<'a, I: 'a, A> {
     pub(crate) buffer: I,
@@ -718,16 +740,9 @@ pub struct SpillStorage<'a, I: 'a, A> {
     _pd: PhantomData<&'a mut ()>,
 }
 
-impl<I, A: RawAllocNew> SpillStorage<'_, I, A> {
-    #[inline]
-    pub fn new(buffer: I) -> Self {
-        Self::new_in(buffer, A::NEW)
-    }
-}
-
 impl<I, A: RawAlloc> SpillStorage<'_, I, A> {
     #[inline]
-    pub fn new_in(buffer: I, alloc: A) -> Self {
+    pub(crate) fn new_in(buffer: I, alloc: A) -> Self {
         Self {
             buffer,
             alloc,
@@ -768,6 +783,8 @@ where
     }
 }
 
+/// A ZST representing the 'thin' allocation strategy, where data pointers
+/// are thin and any metadata is stored within the allocation
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Thin;
 

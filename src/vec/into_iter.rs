@@ -7,6 +7,7 @@ use crate::index::Index;
 
 use super::buffer::VecBuffer;
 
+/// A struct used for extracting all items from a Vec as an iterator
 #[derive(Debug)]
 pub struct IntoIter<B: VecBuffer> {
     remain: Range<usize>,
@@ -26,6 +27,7 @@ impl<B: VecBuffer> IntoIter<B> {
         }
     }
 
+    /// Access the remaining items as a slice reference
     pub fn as_slice(&self) -> &[B::Data] {
         unsafe {
             slice::from_raw_parts(
@@ -35,6 +37,7 @@ impl<B: VecBuffer> IntoIter<B> {
         }
     }
 
+    /// Access the remaining items as a mutable slice reference
     pub fn as_mut_slice(&mut self) -> &mut [B::Data] {
         unsafe {
             slice::from_raw_parts_mut(
@@ -44,10 +47,12 @@ impl<B: VecBuffer> IntoIter<B> {
         }
     }
 
+    /// Check if there are remaining items in the iterator
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Get the number of remaining items in the iterator
     pub const fn len(&self) -> usize {
         self.remain.end - self.remain.start
     }
