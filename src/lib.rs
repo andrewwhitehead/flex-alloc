@@ -4,22 +4,22 @@
 //!
 //! ## Fixed storage
 //!
-//! Vectors may be allocated in fixed storage, a buffer which might be
+//! `Vec` instances may be allocated in fixed storage, a buffer which might be
 //! stored on the stack or statically.
 //!
 //! ```
 //! use flex_alloc::{storage::byte_storage, vec::Vec};
 //!
 //! let mut buf = byte_storage::<1024>();
-//! let mut b = Vec::new_in(&mut buf);
-//! b.push(22usize);
+//! let mut v = Vec::new_in(&mut buf);
+//! v.push(22usize);
 //! ```
 //!
 //! A fixed storage buffer may also be chained to an allocator, meaning that
-//! and when the capacity of the buffer is exceeded, then the allocator
-//! will be used to obtain additional memory. For critical sections where the
-//! size of the input is variable but may often fit on the stack, this can
-//! help to eliminate costly allocations and lead to performance improvements.
+//! when the capacity of the buffer is exceeded, then the allocator will be
+//! used to obtain additional memory. For critical sections where the size of
+//! the input is variable but may often fit on the stack, this can help to
+//! eliminate costly allocations and lead to performance improvements.
 //!
 //! ```
 //! # #[cfg(feature = "alloc")] {
@@ -81,7 +81,7 @@
 //! ```
 //!
 //! ```
-//! use flex_alloc::{vec, storage::Inline};
+//! use flex_alloc::{storage::Inline, vec};
 //!
 //! let v = vec![in Inline::<5>; 1, 2, 3, 4, 5];
 //! ```
