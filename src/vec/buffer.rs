@@ -79,6 +79,9 @@ pub trait VecBuffer: RawBuffer<RawData = Self::Data> {
         unsafe { slice::from_raw_parts_mut(self.data_ptr_mut(), self.length().to_usize()) }
     }
 
+    /// # Safety
+    /// The index must be within the bounds of the buffer's capacity, otherwise a
+    /// memory access error may occur.
     #[inline]
     unsafe fn uninit_index(&mut self, index: usize) -> &mut MaybeUninit<Self::Data> {
         &mut *self.data_ptr_mut().add(index).cast()

@@ -27,6 +27,10 @@ pub trait RawAlloc {
         Ok(ptr)
     }
 
+    /// # Safety
+    /// The value `ptr` must represent an allocation produced by this allocator, otherwise
+    /// a memory access error may occur. The value `old_layout` must correspond to the
+    /// layout produced by the previous allocation.
     unsafe fn try_resize(
         &self,
         ptr: NonNull<u8>,
@@ -45,6 +49,10 @@ pub trait RawAlloc {
         Ok(new_ptr)
     }
 
+    /// # Safety
+    /// The value `ptr` must represent an allocation produced by this allocator, otherwise
+    /// a memory access error may occur. The value `old_layout` must correspond to the
+    /// layout produced by the previous allocation.
     unsafe fn release(&self, ptr: NonNull<u8>, layout: Layout);
 }
 
