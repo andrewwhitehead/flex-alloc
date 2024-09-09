@@ -331,6 +331,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.buffer.length()
     }
 
+    /// # Safety
+    /// The length must not exceed the current buffer capacity. All entries
+    /// in the range `0..length` must be properly initialized prior to
+    /// setting the length.
     #[inline]
     pub unsafe fn set_len(&mut self, length: C::Index) {
         self.buffer.set_length(length)
@@ -368,7 +372,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     }
 
     #[inline]
-    pub fn reserve_exact(&mut self, reserve: usize) {
+    pub fn reserve_exact(&mut self, reserve: C::Index) {
         match self.try_reserve_exact(reserve) {
             Ok(_) => (),
             Err(error) => error.panic(),
@@ -376,7 +380,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     }
 
     #[inline]
-    pub fn try_reserve_exact(&mut self, reserve: usize) -> Result<(), StorageError> {
+    pub fn try_reserve_exact(&mut self, reserve: C::Index) -> Result<(), StorageError> {
         self._try_reserve(reserve.into(), true)
     }
 
@@ -652,6 +656,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// # Safety
+    /// The buffer must have sufficient capacity for one more item.
     #[inline]
     pub unsafe fn push_unchecked(&mut self, item: T) {
         let length = self.buffer.length().to_usize();
