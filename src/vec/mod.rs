@@ -64,6 +64,37 @@ fn bounds_to_range<I: Index>(range: impl RangeBounds<I>, length: I) -> Range<usi
     Range { start, end }
 }
 
+struct DropSlice<T> {
+    ptr: *mut T,
+    len: usize,
+}
+
+impl<T> Iterator for DropSlice<T> {
+    type Item = *mut T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len > 0 {
+            let ret = self.ptr;
+            unsafe {
+                self.ptr = self.ptr.add(1);
+            }
+            self.len -= 1;
+            Some(ret)
+        } else {
+            None
+        }
+    }
+}
+
+impl<T> Drop for DropSlice<T> {
+    fn drop(&mut self) {
+        if self.len > 0 {
+            unsafe { ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.ptr, self.len)) }
+        }
+    }
+}
+
 #[cfg(feature = "alloc")]
 #[inline]
 /// Create a `Vec<T>` from an array `[T; N]`.
@@ -425,9 +456,11 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
         let mut new_len = 1;
         let mut head = self.as_mut_ptr();
-        let mut tail = unsafe { head.add(1) };
-        // FIXME on panic, move tail to head
-        for _ in 1..orig_len {
+        let tail_slice = DropSlice {
+            ptr: unsafe { head.add(1) },
+            len: orig_len - 1,
+        };
+        for tail in tail_slice {
             if !cmp(unsafe { &mut *tail }, unsafe { &mut *head }) {
                 head = unsafe { head.add(1) };
                 if head != tail {
@@ -439,7 +472,6 @@ impl<T, C: VecConfig> Vec<T, C> {
                     ptr::drop_in_place(tail);
                 }
             }
-            tail = unsafe { tail.add(1) };
         }
         // SAFETY: capacity of the buffer has been established as > 0
         unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) }
@@ -483,6 +515,46 @@ impl<T, C: VecConfig> Vec<T, C> {
         self._try_reserve(items.len(), false)?;
         unsafe {
             self.extend_unchecked(items);
+        }
+        Ok(())
+    }
+
+    pub fn extend_from_within<R>(&mut self, range: R)
+    where
+        R: RangeBounds<C::Index>,
+        T: Clone,
+    {
+        let range = bounds_to_range(range, self.buffer.length());
+        match self._try_reserve(range.len(), false) {
+            Ok(_) => (),
+            Err(error) => error.panic(),
+        }
+        let (head, mut insert) = Inserter::split_buffer(&mut self.buffer);
+        for item in &head[range] {
+            insert.push_clone(item);
+        }
+        let (added, _) = insert.complete();
+        if added > 0 {
+            let new_len = head.len() + added;
+            unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
+        }
+    }
+
+    pub fn try_extend_from_within<R>(&mut self, range: R) -> Result<(), StorageError>
+    where
+        R: RangeBounds<C::Index>,
+        T: Clone,
+    {
+        let range = bounds_to_range(range, self.buffer.length());
+        self._try_reserve(range.len(), false)?;
+        let (head, mut insert) = Inserter::split_buffer(&mut self.buffer);
+        for item in head[range].iter() {
+            insert.push_clone(item);
+        }
+        let (added, _) = insert.complete();
+        if added > 0 {
+            let new_len: usize = head.len() + added;
+            unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
         }
         Ok(())
     }
@@ -646,6 +718,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    pub fn push_within_capacity(&mut self, item: T) -> Result<(), T> {
+        self.try_push(item).map_err(|e| e.value)
+    }
+
     pub fn try_push(&mut self, item: T) -> Result<(), InsertionError<T>> {
         if let Err(error) = self._try_reserve(1, false) {
             return Err(InsertionError::new(error, item));
@@ -771,14 +847,16 @@ impl<T, C: VecConfig> Vec<T, C> {
         if orig_len == 0 {
             return;
         }
-        let mut tail = self.as_mut_ptr();
         // SAFETY: capacity of the buffer has been established as > 0
         unsafe { self.buffer.set_length(C::Index::ZERO) };
-        // FIXME drop remainder on panic
         let mut len = 0;
-        for idx in 0..orig_len {
+        let read_slice = DropSlice {
+            ptr: self.as_mut_ptr(),
+            len: orig_len,
+        };
+        let mut tail = self.as_mut_ptr();
+        for read in read_slice {
             unsafe {
-                let read = self.as_mut_ptr().add(idx);
                 if f(&mut *read) {
                     if tail != read {
                         ptr::copy_nonoverlapping(read, tail, 1);
@@ -906,9 +984,9 @@ impl<T, C: VecConfig> Vec<T, C> {
         if remove > 0 {
             // SAFETY: buffer capacity is established as > 0
             unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
+            let drop_start = unsafe { self.buffer.data_ptr_mut().add(new_len) };
+            let to_drop = ptr::slice_from_raw_parts_mut(drop_start, remove);
             unsafe {
-                let to_drop: &mut [T] =
-                    slice::from_raw_parts_mut(self.buffer.data_ptr_mut().add(new_len), remove);
                 ptr::drop_in_place(to_drop);
             }
         }
@@ -1543,8 +1621,8 @@ impl<T, C: crate::storage::RawAlloc> zeroize::ZeroizeOnDrop
 {
 }
 
-// From<CString>
-// push_within_capacity
+// TODO
+// into_flattened
 
 /// ```compile_fail,E0597
 /// use flex_alloc::{storage::byte_storage, vec::Vec};

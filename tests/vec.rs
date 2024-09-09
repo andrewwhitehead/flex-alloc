@@ -224,6 +224,24 @@ fn vec_extend_from_slice_new_in<C: VecNewIn<usize>>(#[case] buf: C) {
 #[cfg_attr(feature="alloc", case::thin(Cfg::<Thin>))]
 #[cfg_attr(feature="alloc", case::custom(Cfg::<Custom<Global, u8>>))]
 #[case::inline(Cfg::<Inline<10>>)]
+fn vec_extend_from_within_new<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
+    let mut v = FlexVec::<usize, C>::new();
+    v.extend_from_slice(SLICE);
+    assert!(v.capacity().to_usize() >= SLICE.len());
+    assert!(v.len().to_usize() == SLICE.len());
+    assert_eq!(v.as_slice(), SLICE);
+    let len = C::Index::from_usize(SLICE.len());
+    v.extend_from_within(..len);
+    assert!(v.len().to_usize() == SLICE.len() * 2);
+    assert_eq!(&v[..SLICE.len()], SLICE);
+    assert_eq!(&v[SLICE.len()..], SLICE);
+}
+
+#[rstest]
+#[cfg_attr(feature="alloc", case::global(Cfg::<Global>))]
+#[cfg_attr(feature="alloc", case::thin(Cfg::<Thin>))]
+#[cfg_attr(feature="alloc", case::custom(Cfg::<Custom<Global, u8>>))]
+#[case::inline(Cfg::<Inline<10>>)]
 fn vec_dedup<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
     let mut vec = FlexVec::<usize, C>::from_iter([0, 1, 1, 0, 2, 4, 7, 7, 7]);
     vec.dedup();

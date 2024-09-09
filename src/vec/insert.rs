@@ -35,6 +35,19 @@ impl<'a, T> Inserter<'a, T> {
     }
 
     #[inline]
+    pub fn split_buffer<B>(buf: &'a mut B) -> (&'a [T], Self)
+    where
+        B: VecBuffer<Data = T>,
+    {
+        let cap = buf.capacity().to_usize();
+        let len = buf.length().to_usize();
+        let ptr = buf.data_ptr_mut();
+        let head = unsafe { slice::from_raw_parts(ptr, len) };
+        let ins = unsafe { Self::new(ptr.add(len), cap - len, 0, 0) };
+        (head, ins)
+    }
+
+    #[inline]
     pub fn for_buffer_with_range<B>(buf: &'a mut B, start: usize, count: usize, tail: usize) -> Self
     where
         B: VecBuffer<Data = T>,
