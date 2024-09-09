@@ -4,7 +4,7 @@ use core::marker::PhantomData;
 use core::mem::{align_of, ManuallyDrop};
 use core::ptr::{self, NonNull};
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 pub use allocator_api2::alloc::{Allocator, Global};
 
 #[cfg(all(feature = "alloc", not(feature = "allocator-api2")))]
@@ -95,12 +95,12 @@ pub trait RawAllocNew: RawAlloc + Clone {
     const NEW: Self;
 }
 
-#[cfg(not(feature = "allocator-api2"))]
+#[cfg(any(not(feature = "alloc"), not(feature = "allocator-api2")))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "alloc", derive(Default, Copy))]
 pub struct Global;
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<A: Allocator> RawAlloc for A {
     #[inline]
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
@@ -125,7 +125,10 @@ impl RawAlloc for Global {
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError> {
         let ptr = if layout.size() == 0 {
             // FIXME: use Layout::dangling when stabilized
-            unsafe { NonNull::new_unchecked(transmute(layout.align())) }
+            #[allow(clippy::useless_transmute)]
+            unsafe {
+                NonNull::new_unchecked(transmute(layout.align()))
+            }
         } else {
             let Some(ptr) = NonNull::new(unsafe { raw_alloc(layout) }) else {
                 return Err(StorageError::AllocError);

@@ -42,9 +42,9 @@ fn vec_default<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 #[case::inline(Cfg::<Inline<10>>)]
 fn vec_new_as_slice<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
     let mut v = FlexVec::<usize, C>::new();
-    assert_eq!(v.as_slice(), &[]);
-    assert_eq!(v.drain(..).as_slice(), &[]);
-    assert_eq!(v.into_iter().as_slice(), &[]);
+    assert!(v.as_slice().is_empty());
+    assert!(v.drain(..).as_slice().is_empty());
+    assert!(v.into_iter().as_slice().is_empty());
 }
 
 #[rstest]
@@ -57,9 +57,9 @@ fn vec_new_as_slice<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 #[case::inline(Inline::<10>)]
 fn vec_new_in_as_slice<C: VecNewIn<usize>>(#[case] buf: C) {
     let mut v = FlexVec::new_in(buf);
-    assert_eq!(v.as_slice(), &[]);
-    assert_eq!(v.drain(..).as_slice(), &[]);
-    assert_eq!(v.into_iter().as_slice(), &[]);
+    assert!(v.as_slice().is_empty());
+    assert!(v.drain(..).as_slice().is_empty());
+    assert!(v.into_iter().as_slice().is_empty());
 }
 
 #[rstest]
@@ -121,7 +121,7 @@ fn vec_append<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
     let mut v2 = FlexVec::from([4, 5, 6]);
     v1.append(&mut v2);
     assert_eq!(v1, &[1, 2, 3, 4, 5, 6]);
-    assert_eq!(v2, &[]);
+    assert!(v2.is_empty());
 }
 
 #[rstest]
@@ -134,7 +134,7 @@ fn vec_append_to_empty<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
     let mut v2 = FlexVec::from([1, 2, 3]);
     v1.append(&mut v2);
     assert_eq!(v1, &[1, 2, 3]);
-    assert_eq!(v2, &[]);
+    assert!(v2.is_empty());
 }
 
 #[rstest]
@@ -461,7 +461,7 @@ fn vec_zst() {
     assert_eq!(iter.next(), None);
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 #[test]
 fn vec_into_allocator_api2_vec() {
     let mut b = FlexVec::<usize>::with_capacity(10);
@@ -492,7 +492,7 @@ fn vec_into_boxed_slice() {
     assert_eq!(&*boxed, SLICE);
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 #[test]
 fn vec_into_allocator_api2_boxed_slice() {
     let vec = FlexVec::<_>::from_slice(SLICE);
@@ -503,7 +503,7 @@ fn vec_into_allocator_api2_boxed_slice() {
     assert_eq!(vec.capacity(), SLICE.len());
 }
 
-#[cfg(all(feature = "alloc", not(feature = "allocator-api2")))]
+#[cfg(feature = "alloc")]
 #[test]
 fn vec_into_std_boxed_slice() {
     let vec = FlexVec::<_>::from_slice(SLICE);

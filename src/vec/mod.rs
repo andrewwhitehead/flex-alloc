@@ -4,18 +4,22 @@ use core::fmt;
 use core::iter::repeat;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
-use core::ptr::{self, slice_from_raw_parts_mut, NonNull};
+use core::ptr;
 use core::slice;
+
+#[cfg(feature = "alloc")]
+use core::ptr::NonNull;
 
 use crate::error::{InsertionError, StorageError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
 
 use self::buffer::VecBuffer;
-use self::config::{
-    VecConfig, VecConfigAlloc, VecConfigAllocParts, VecConfigNew, VecConfigSpawn, VecNewIn,
-};
+use self::config::{VecConfig, VecConfigAlloc, VecConfigNew, VecConfigSpawn, VecNewIn};
 use self::insert::Inserter;
+
+#[cfg(feature = "alloc")]
+use self::config::VecConfigAllocParts;
 
 pub use self::{drain::Drain, into_iter::IntoIter, splice::Splice};
 
@@ -280,7 +284,7 @@ where
         self.shrink_to_fit();
         let (data, length, capacity, _alloc) = self.into_parts();
         assert_eq!(capacity, length);
-        let data = slice_from_raw_parts_mut(data.as_ptr(), length);
+        let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length);
         unsafe { alloc::boxed::Box::from_raw(data) }
     }
 
@@ -288,11 +292,12 @@ where
         self.try_shrink_to_fit()?;
         let (data, length, capacity, _alloc) = self.into_parts();
         assert_eq!(capacity, length);
-        let data = slice_from_raw_parts_mut(data.as_ptr(), length);
+        let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length);
         Ok(unsafe { alloc::boxed::Box::from_raw(data) })
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
     #[inline]
     pub(crate) fn into_parts(self) -> (NonNull<T>, C::Index, C::Index, C::Alloc) {
@@ -1133,7 +1138,7 @@ where
     }
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<T, C, A> From<allocator_api2::boxed::Box<[T], A>> for Vec<T, C>
 where
     A: allocator_api2::alloc::Allocator,
@@ -1156,7 +1161,7 @@ where
     }
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<T, C, A> From<Vec<T, C>> for allocator_api2::boxed::Box<[T], A>
 where
     A: allocator_api2::alloc::Allocator,
@@ -1181,7 +1186,7 @@ where
     }
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<T, C, A> From<allocator_api2::vec::Vec<T, A>> for Vec<T, C>
 where
     A: allocator_api2::alloc::Allocator,
@@ -1208,7 +1213,7 @@ where
     }
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<T, C, A> From<Vec<T, C>> for allocator_api2::vec::Vec<T, A>
 where
     A: allocator_api2::alloc::Allocator,
@@ -1488,7 +1493,7 @@ where
     }
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<A, B, C> PartialEq<allocator_api2::vec::Vec<A>> for Vec<B, C>
 where
     B: PartialEq<A>,
@@ -1512,7 +1517,7 @@ where
     }
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<A, B, C> PartialEq<Vec<B, C>> for allocator_api2::vec::Vec<A>
 where
     B: PartialEq<A>,
@@ -1559,7 +1564,7 @@ where
     }
 }
 
-#[cfg(feature = "allocator-api2")]
+#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 impl<T, C, A, const N: usize> TryFrom<Vec<T, C>> for allocator_api2::boxed::Box<[T; N], A>
 where
     C: VecConfigAllocParts<T, Alloc = A, Index = usize>,

@@ -47,7 +47,7 @@
 //! will implement `Zeroize` and `ZeroizeOnDrop` when appropriate.
 //!
 //! ```
-//! # #[cfg(feature = "zeroize")] {
+//! # #[cfg(all(feature = "alloc", feature = "zeroize"))] {
 //! use flex_alloc::vec::ZeroizingVec;
 //!
 //! let v = ZeroizingVec::from([1, 2, 3]);
