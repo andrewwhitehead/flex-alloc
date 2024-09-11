@@ -12,7 +12,7 @@ use crate::index::{Grow, Index};
 pub struct Splice<'s, I, B, G>
 where
     I: Iterator,
-    B: VecBuffer<Data = I::Item>,
+    B: VecBuffer<Item = I::Item>,
     G: Grow,
 {
     drain: Drain<'s, B>,
@@ -23,7 +23,7 @@ where
 impl<'s, I, B, G> Splice<'s, I, B, G>
 where
     I: Iterator,
-    B: VecBuffer<Data = I::Item>,
+    B: VecBuffer<Item = I::Item>,
     G: Grow,
 {
     pub(super) fn new(vec: &'s mut B, extend: I, range: Range<usize>) -> Self {
@@ -49,7 +49,7 @@ where
 impl<'s, I, B, G> Iterator for Splice<'s, I, B, G>
 where
     I: Iterator,
-    B: VecBuffer<Data = I::Item>,
+    B: VecBuffer<Item = I::Item>,
     G: Grow,
 {
     type Item = I::Item;
@@ -75,7 +75,7 @@ where
 impl<'s, I, B, G> DoubleEndedIterator for Splice<'s, I, B, G>
 where
     I: Iterator,
-    B: VecBuffer<Data = I::Item>,
+    B: VecBuffer<Item = I::Item>,
     G: Grow,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
@@ -86,7 +86,7 @@ where
 impl<'s, I, B, G> ExactSizeIterator for Splice<'s, I, B, G>
 where
     I: Iterator,
-    B: VecBuffer<Data = I::Item>,
+    B: VecBuffer<Item = I::Item>,
     G: Grow,
 {
 }
@@ -94,7 +94,7 @@ where
 impl<'s, I, B, G> FusedIterator for Splice<'s, I, B, G>
 where
     I: Iterator,
-    B: VecBuffer<Data = I::Item>,
+    B: VecBuffer<Item = I::Item>,
     G: Grow,
 {
 }
@@ -102,7 +102,7 @@ where
 impl<'s, I, B, G> Drop for Splice<'s, I, B, G>
 where
     I: Iterator,
-    B: VecBuffer<Data = I::Item>,
+    B: VecBuffer<Item = I::Item>,
     G: Grow,
 {
     fn drop(&mut self) {
@@ -126,7 +126,7 @@ where
                 let new_cap =
                     B::Index::try_from_usize(buf_cap.to_usize() + min_remain - cap_remain)
                         .expect("exceeded range of capacity");
-                let new_cap = G::next_capacity::<B::Data, _>(buf_cap, new_cap);
+                let new_cap = G::next_capacity::<B::Item, _>(buf_cap, new_cap);
                 match self.drain.buf.vec_try_resize(new_cap, false) {
                     Ok(_) => (),
                     Err(err) => err.panic(),

@@ -17,10 +17,10 @@ use crate::error::StorageError;
 use super::utils::layout_aligned_bytes;
 use super::{ByteStorage, RawBuffer};
 
-/// The low level trait implemented by all allocators
+/// The low level trait implemented by all supported allocators.
 pub trait RawAlloc {
     /// Try to allocate a slice of memory within this allocator instance,
-    /// returning the new allocation
+    /// returning the new allocation.
     fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, StorageError>;
 
     /// Try to allocate a slice of memory within this allocator instance,
@@ -66,7 +66,7 @@ pub trait RawAlloc {
 }
 
 /// For all types which are an allocator or reference an allocator, enable their
-/// usage as a target for allocation
+/// usage as a target for allocation.
 pub trait RawAllocIn: Sized {
     /// The type of the allocator instance
     type RawAlloc: RawAlloc;
@@ -108,12 +108,14 @@ impl<A: RawAlloc> RawAllocIn for A {
     }
 }
 
-/// A trait implemented by allocators supporting a constant initializer
+/// A trait implemented by allocators supporting a constant initializer.
 pub trait RawAllocNew: RawAlloc + Clone {
     /// The constant initializer for this allocator
     const NEW: Self;
 }
 
+/// The standard heap allocator. When the `alloc` feature is not enabled,
+/// usage will result in a panic.
 #[cfg(any(not(feature = "alloc"), not(feature = "allocator-api2")))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "alloc", derive(Default, Copy))]
@@ -206,10 +208,14 @@ pub trait AllocHandle: RawBuffer<RawData = <Self::Meta as AllocLayout>::Data> {
 
     fn is_empty_handle(&self) -> bool;
 
-    /// SAFETY: is_empty_handle must return false
+    /// # Safety
+    /// The `is_empty_handle` method must return false for this method
+    /// to be safe to call.
     unsafe fn header(&self) -> &<Self::Meta as AllocLayout>::Header;
 
-    /// SAFETY: is_empty_handle must return false
+    /// # Safety
+    /// The `is_empty_handle` method must return false for this method
+    /// to be safe to call.
     unsafe fn header_mut(&mut self) -> &mut <Self::Meta as AllocLayout>::Header;
 
     fn alloc_handle_in<A>(
@@ -260,6 +266,7 @@ pub trait AllocHandleParts: AllocHandle {
     fn handle_into_parts(self) -> AllocParts<Self>;
 }
 
+/// An allocation handle which stores the header metadata within.
 #[derive(Debug)]
 pub struct FatAllocHandle<Meta: AllocLayout, Alloc: RawAlloc> {
     header: Meta::Header,
@@ -479,6 +486,7 @@ impl<Meta: AllocLayout> fmt::Debug for ThinPtr<Meta> {
     }
 }
 
+/// An allocation handle which stores the header metadata in the associated allocation.
 #[derive(Debug)]
 pub struct ThinAllocHandle<Meta: AllocLayout, Alloc: RawAlloc> {
     data: ThinPtr<Meta>,
@@ -637,7 +645,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> Drop for ThinAllocHandle<Meta, Alloc> {
     }
 }
 
-/// An allocator backed by a fixed storage buffer
+/// An allocator backed by a fixed storage buffer.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct FixedAlloc<'a>(PhantomData<&'a mut ()>);
 
@@ -680,6 +688,8 @@ impl<'a, T, const N: usize> RawAllocIn for &'a mut ByteStorage<T, N> {
     }
 }
 
+/// An allocator which may represent either a fixed allocation or a dynamic
+/// allocation with an allocator instance `A`.
 #[derive(Debug)]
 pub struct SpillAlloc<'a, A> {
     alloc: A,
@@ -788,10 +798,10 @@ where
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Thin;
 
-// Calculate the byte offset of Data when following Header. This should
-// be equivalent to offset_of!((Meta::Header, Meta::Data), 1)
-// although repr(C) would need to be used to guarantee consistency.
-// See `Layout::padding_needed_for`` (currently unstable) for reference.
+/// Calculate the byte offset of Data when following Header. This should
+/// be equivalent to offset_of!((Meta::Header, Meta::Data), 1)
+/// although repr(C) would need to be used to guarantee consistency.
+/// See `Layout::padding_needed_for` (currently unstable) for reference.
 const fn data_offset<Header, Data>() -> usize {
     let header = Layout::new::<Header>();
     let data_align = align_of::<Data>();

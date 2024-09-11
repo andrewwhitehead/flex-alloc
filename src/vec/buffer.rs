@@ -2,7 +2,6 @@
 
 use core::alloc::Layout;
 use core::fmt::Debug;
-use core::marker::PhantomData;
 use core::mem::{size_of, MaybeUninit};
 use core::slice;
 
@@ -12,9 +11,12 @@ use crate::storage::alloc::{AllocHandle, AllocHandleNew, AllocHeader, AllocLayou
 use crate::storage::utils::array_layout;
 use crate::storage::{InlineBuffer, RawBuffer};
 
+/// The header associated with each `Vec` instance.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct VecHeader<I: Index = usize> {
+    /// The capacity of the buffer.
     pub capacity: I,
+    /// The number of items stored in the buffer.
     pub length: I,
 }
 
@@ -30,8 +32,9 @@ impl<I: Index> AllocHeader for VecHeader<I> {
     }
 }
 
+/// An abstract type which captures the parameters of a `Vec` type's data representation.
 #[derive(Debug)]
-pub struct VecData<T, I: Index = usize>(PhantomData<(T, I)>);
+pub struct VecData<T, I: Index = usize>(T, I);
 
 impl<T, I: Index> AllocLayout for VecData<T, I> {
     type Header = VecHeader<I>;
@@ -53,43 +56,62 @@ impl<T, I: Index> AllocLayout for VecData<T, I> {
     }
 }
 
-pub trait VecBuffer: RawBuffer<RawData = Self::Data> {
-    type Data;
+/// A concrete `Vec` backing buffer.
+pub trait VecBuffer: RawBuffer<RawData = Self::Item> {
+    /// The type of the items stored in the `Vec`.
+    type Item;
+
+    /// The index type used to store the capacity and length.
     type Index: Index;
 
+    /// Access the capacity of the buffer.
     fn capacity(&self) -> Self::Index;
 
+    /// Access the number of items stored in the buffer.
     fn length(&self) -> Self::Index;
 
+    /// Set the current length of the buffer.
+    ///
     /// # Safety
     /// A zero length buffer may not have an active allocation, and so it is
     /// undefined behaviour to set its length, even if setting it to zero. Doing so
     /// may produce invalid memory access errors.
     unsafe fn set_length(&mut self, len: Self::Index);
 
+    /// Access the contiguous memory contained in this buffer as a slice of
+    /// `MaybeUnint<Self::Item>`. The length of this slice must correspond to
+    /// `self.capacity()`.
     #[inline]
-    fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<Self::Data>] {
+    fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<Self::Item>] {
         unsafe { slice::from_raw_parts_mut(self.data_ptr_mut().cast(), self.capacity().to_usize()) }
     }
 
+    /// Access the items contained in this buffer as a slice of `Self::Item`. The length
+    /// of this slice must correspond to `self.length()`.
     #[inline]
-    fn as_slice(&self) -> &[Self::Data] {
+    fn as_slice(&self) -> &[Self::Item] {
         unsafe { slice::from_raw_parts(self.data_ptr(), self.length().to_usize()) }
     }
 
+    /// Access the items contained in this buffer as a mutable slice of `Self::Item`. The
+    /// length of this slice must correspond to `self.length()`.
     #[inline]
-    fn as_mut_slice(&mut self) -> &mut [Self::Data] {
+    fn as_mut_slice(&mut self) -> &mut [Self::Item] {
         unsafe { slice::from_raw_parts_mut(self.data_ptr_mut(), self.length().to_usize()) }
     }
 
+    /// Access an index of the buffer as a mutable reference to a `MaybeUninit<Self::Item>`.
+    ///
     /// # Safety
     /// The index must be within the bounds of the buffer's capacity, otherwise a
     /// memory access error may occur.
     #[inline]
-    unsafe fn uninit_index(&mut self, index: usize) -> &mut MaybeUninit<Self::Data> {
+    unsafe fn uninit_index(&mut self, index: usize) -> &mut MaybeUninit<Self::Item> {
         &mut *self.data_ptr_mut().add(index).cast()
     }
 
+    /// Attempt to resize this buffer to a new capacity. The `exact` flag determines
+    /// whether a larger capacity would be acceptable.
     fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError>;
 }
 
@@ -97,7 +119,7 @@ impl<B, T, I: Index> VecBuffer for B
 where
     B: AllocHandle<Meta = VecData<T, I>>,
 {
-    type Data = T;
+    type Item = T;
     type Index = I;
 
     #[inline]
@@ -131,15 +153,19 @@ where
     }
 }
 
+/// Support creation of a new `VecBuffer`.
 pub trait VecBufferNew: VecBufferSpawn {
+    /// A constant initializer for the buffer.
     const NEW: Self;
 
+    /// Try to allocate a new buffer of a given capacity. The `exact` flag determines
+    /// whether a larger capacity would be acceptable.
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
 }
 
 impl<B> VecBufferNew for B
 where
-    B: VecBufferSpawn + AllocHandleNew<Meta = VecData<Self::Data, Self::Index>>,
+    B: VecBufferSpawn + AllocHandleNew<Meta = VecData<Self::Item, Self::Index>>,
 {
     const NEW: Self = Self::NEW;
 
@@ -156,7 +182,10 @@ where
     }
 }
 
+/// Support spawning a new buffer from an existing `VecBuffer` reference.
 pub trait VecBufferSpawn: VecBuffer {
+    /// Try to spawn a new buffer of a given capacity. The `exact` flag determines
+    /// whether a larger capacity would be acceptable.
     fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
 }
 
@@ -178,7 +207,7 @@ where
 }
 
 impl<'a, T: 'a, const N: usize> VecBuffer for InlineBuffer<T, N> {
-    type Data = T;
+    type Item = T;
     type Index = usize;
 
     #[inline]
@@ -207,7 +236,7 @@ impl<'a, T: 'a, const N: usize> VecBuffer for InlineBuffer<T, N> {
 }
 
 impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
-    const NEW: Self = InlineBuffer::new();
+    const NEW: Self = InlineBuffer::DEFAULT;
 
     #[inline]
     fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {

@@ -27,7 +27,7 @@ impl<'a, T> Inserter<'a, T> {
     #[inline]
     pub fn for_buffer<B>(buf: &'a mut B) -> Self
     where
-        B: VecBuffer<Data = T>,
+        B: VecBuffer<Item = T>,
     {
         let cap = buf.capacity().to_usize();
         let len = buf.length().to_usize();
@@ -37,7 +37,7 @@ impl<'a, T> Inserter<'a, T> {
     #[inline]
     pub fn split_buffer<B>(buf: &'a mut B) -> (&'a [T], Self)
     where
-        B: VecBuffer<Data = T>,
+        B: VecBuffer<Item = T>,
     {
         let cap = buf.capacity().to_usize();
         let len = buf.length().to_usize();
@@ -50,7 +50,7 @@ impl<'a, T> Inserter<'a, T> {
     #[inline]
     pub fn for_buffer_with_range<B>(buf: &'a mut B, start: usize, count: usize, tail: usize) -> Self
     where
-        B: VecBuffer<Data = T>,
+        B: VecBuffer<Item = T>,
     {
         let cap = start + count;
         assert!(cap + tail <= buf.capacity().to_usize());

@@ -9,11 +9,15 @@ use core::{
 use crate::storage::{RawAlloc, RawAllocIn};
 use crate::{error::StorageError, storage::RawAllocNew};
 
+/// The owned type for a collection which may be owned or borrowed.
 pub type Owned<B, A> = <B as ToOwnedIn<A>>::Owned;
 
+/// Support conversion from borrowed types to owned ones associated with an allocator.
 pub trait ToOwnedIn<A: RawAlloc> {
+    /// The owned representation of this type.
     type Owned: Borrow<Self>;
 
+    /// Create an owned copy of this instance in a given allocation target.
     fn to_owned_in<I>(&self, alloc_in: I) -> Self::Owned
     where
         I: RawAllocIn<RawAlloc = A>,
@@ -24,13 +28,10 @@ pub trait ToOwnedIn<A: RawAlloc> {
         }
     }
 
+    /// To to create an owned copy of this instance in a given allocation target.
     fn try_to_owned_in<I>(&self, alloc_in: I) -> Result<Self::Owned, StorageError>
     where
         I: RawAllocIn<RawAlloc = A>;
-
-    // fn clone_into(&self, target: &mut Self::Owned) {
-    //     *target = self.to_owned();
-    // }
 }
 
 impl<T: Clone + 'static, A: RawAlloc> ToOwnedIn<A> for T {
@@ -44,29 +45,47 @@ impl<T: Clone + 'static, A: RawAlloc> ToOwnedIn<A> for T {
     }
 }
 
+/// Representation of either an owned or borrowed instance of a type.
 pub enum Cow<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> {
+    /// The borrowed variant, limited by a lifetime.
     Borrowed(&'b T),
+
+    /// The owned variant.
     Owned(Owned<T, A>),
 }
 
 impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
+    /// Determine if this instance is borrowed.
     #[inline]
     pub fn is_borrowed(&self) -> bool {
         matches!(self, Self::Borrowed(_))
     }
 
+    /// Determine if this instance is owned.
     #[inline]
     pub fn is_owned(&self) -> bool {
         matches!(self, Self::Owned(_))
     }
 
+    /// If necessary, convert `self` into an owned instance. Return a mutable reference
+    /// to the owned instance.
+    #[inline]
     pub fn to_mut(&mut self) -> &mut Owned<T, A>
     where
         A: RawAllocNew,
     {
+        self.to_mut_in(A::NEW)
+    }
+
+    /// If necessary, convert `self` into an owned instance given an allocation target.
+    /// Return a mutable reference to the owned instance.
+    pub fn to_mut_in<I>(&mut self, alloc_in: I) -> &mut Owned<T, A>
+    where
+        I: RawAllocIn<RawAlloc = A>,
+    {
         match *self {
             Self::Borrowed(borrowed) => {
-                *self = Self::Owned(borrowed.to_owned_in(A::NEW));
+                *self = Self::Owned(borrowed.to_owned_in(alloc_in));
                 let Self::Owned(owned) = self else {
                     unreachable!()
                 };
@@ -76,8 +95,8 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
         }
     }
 
-    // TODO to_mut_in?
-
+    /// If necessary, convert `self` into an owned instance. Unwrap and return the
+    /// owned instance.
     pub fn into_owned(self) -> Owned<T, A>
     where
         A: RawAllocNew,
@@ -88,6 +107,8 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
         }
     }
 
+    /// If necessary, convert `self` into an owned instance given an allocation target.
+    /// Unwrap and return the owned instance.
     pub fn into_owned_in<I>(self, alloc_in: I) -> Owned<T, A>
     where
         I: RawAllocIn<RawAlloc = A>,
@@ -98,6 +119,8 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
         }
     }
 
+    /// If necessary, try to convert `self` into an owned instance.
+    /// Unwrap and return the owned instance or a storage error.
     pub fn try_into_owned(self) -> Result<Owned<T, A>, StorageError>
     where
         A: RawAllocNew,
@@ -108,6 +131,8 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
         }
     }
 
+    /// If necessary, try to convert `self` into an owned instance given an allocation
+    /// target. Unwrap and return the owned instance or a storage error.
     pub fn try_into_owned_in<I>(self, storage: I) -> Result<Owned<T, A>, StorageError>
     where
         I: RawAllocIn<RawAlloc = A>,

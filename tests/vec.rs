@@ -641,7 +641,7 @@ fn vec_custom_index_capacity() {
     v.resize(255, 1);
     assert!(v.try_push(1).is_err());
 
-    let mut v = FlexVec::new_in(Custom::<Global, u8>::new());
+    let mut v = FlexVec::new_in(Custom::<Global, u8>::DEFAULT);
     v.resize(255, 1);
     assert!(v.try_push(1).is_err());
 }

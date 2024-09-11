@@ -1,4 +1,4 @@
-//! Support for generic `Vec` structures containing a resizable, contiguous array
+//! Support for generic vector structures containing a resizable, contiguous array
 //! of items.
 
 use core::borrow::{Borrow, BorrowMut};
@@ -38,16 +38,16 @@ pub(crate) mod insert;
 mod into_iter;
 mod splice;
 
-/// A `Vec` which stores its contained data inline, using no external allocation.
+/// A vector which stores its contained data inline, using no external allocation.
 pub type InlineVec<T, const N: usize> = Vec<T, crate::storage::Inline<N>>;
 
 #[cfg(feature = "alloc")]
-/// A `Vec` which is pointer-sized, storing its capacity and length in the
+/// A vector which is pointer-sized, storing its capacity and length in the
 /// allocated buffer.
 pub type ThinVec<T> = Vec<T, crate::storage::Thin>;
 
 #[cfg(feature = "zeroize")]
-/// A `Vec` which automatically zeroizes its buffer when dropped.
+/// A vector which automatically zeroizes its buffer when dropped.
 pub type ZeroizingVec<T> = Vec<T, crate::storage::ZeroizingAlloc<Global>>;
 
 #[cold]
@@ -157,12 +157,14 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
     /// let mut vec: Vec<i32> = Vec::new();
     /// ```
     pub const fn new() -> Self {
-        Self { buffer: C::NEW }
+        Self {
+            buffer: C::EMPTY_BUFFER,
+        }
     }
 
     /// Try to construct a new `Vec<T, C>` with a minimum capacity.
     pub fn try_with_capacity(capacity: C::Index) -> Result<Self, StorageError> {
-        let buffer = C::vec_try_new(capacity, false)?;
+        let buffer = C::vec_buffer_try_new(capacity, false)?;
         Ok(Self { buffer })
     }
 
@@ -213,7 +215,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     where
         A: VecNewIn<T, Config = C>,
     {
-        match A::vec_try_new_in(alloc_in, C::Index::ZERO, false) {
+        match A::vec_buffer_try_new_in(alloc_in, C::Index::ZERO, false) {
             Ok(buffer) => Self { buffer },
             Err(err) => err.panic(),
         }
@@ -225,7 +227,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         A: VecNewIn<T, Config = C>,
     {
         Ok(Self {
-            buffer: A::vec_try_new_in(alloc_in, C::Index::ZERO, false)?,
+            buffer: A::vec_buffer_try_new_in(alloc_in, C::Index::ZERO, false)?,
         })
     }
 
@@ -250,7 +252,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         A: VecNewIn<T, Config = C>,
     {
         Ok(Self {
-            buffer: A::vec_try_new_in(alloc_in, capacity, false)?,
+            buffer: A::vec_buffer_try_new_in(alloc_in, capacity, false)?,
         })
     }
 
@@ -321,6 +323,8 @@ where
 
     /// Try to convert this instance into a `Box<[T]>`. This may produce a new allocation
     /// if the length of the collection does not match its capacity.
+    ///
+    /// FIXME drops the vec on error, needs a new error type
     pub fn try_into_boxed_slice(mut self) -> Result<alloc::boxed::Box<[T]>, StorageError> {
         self.try_shrink_to_fit()?;
         let (data, length, capacity, _alloc) = self.into_parts();
@@ -334,7 +338,7 @@ where
 impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
     #[inline]
     pub(crate) fn into_parts(self) -> (NonNull<T>, C::Index, C::Index, C::Alloc) {
-        C::vec_into_parts(self.into_inner())
+        C::vec_buffer_into_parts(self.into_inner())
     }
 
     #[inline]
@@ -345,7 +349,7 @@ impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
         alloc: C::Alloc,
     ) -> Self {
         Self {
-            buffer: C::vec_from_parts(data, length, capacity, alloc),
+            buffer: C::vec_buffer_from_parts(data, length, capacity, alloc),
         }
     }
 }
@@ -396,6 +400,16 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.len() == C::Index::ZERO
     }
 
+    /// Consumes and leaks the vector, returning a mutable reference to the contents,
+    /// `&'a mut [T]`. Note that the type `T` must outlive the chosen lifetime `'a`. If the
+    /// type has only static references, or none at all, then this may be chosen to be
+    /// `'static`.
+    ///
+    /// This method does not reallocate or shrink the Vec, so the leaked allocation may include
+    /// unused capacity that is not part of the returned slice.
+    ///
+    /// This function is mainly useful for data that lives for the remainder of the program’s life.
+    /// Dropping the returned reference will cause a memory leak.
     #[inline]
     pub fn leak<'a>(self) -> &'a mut [T]
     where
@@ -478,7 +492,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         self._try_reserve(reserve.into(), true)
     }
 
-    /// Append the contents of another `Vec` to this instance, removing
+    /// Append the contents of another vector to this instance, removing
     /// the items from `other` in the process.
     pub fn append(&mut self, other: &mut Self) {
         if self.is_empty() {
@@ -503,6 +517,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Removes consecutive repeated elements in the vector according to the PartialEq
+    /// trait implementation.
+    ///
+    /// If the vector is sorted, this removes all duplicates.
     #[inline]
     pub fn dedup(&mut self)
     where
@@ -511,6 +529,15 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.dedup_by(|a, b| a == b)
     }
 
+    /// Removes all but the first of consecutive elements in the vector satisfying a
+    /// given predicate.
+    ///
+    /// The `cmp` function is passed references to two elements from the vector and
+    /// must determine if the elements compare equal. The elements are passed in opposite
+    /// order from their order in the slice, so if `cmp(a, b)` returns `true`, `a` is
+    /// removed.
+    ///
+    /// If the vector is sorted, this removes all duplicates.
     pub fn dedup_by<F>(&mut self, mut cmp: F)
     where
         F: FnMut(&mut T, &mut T) -> bool,
@@ -542,6 +569,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) }
     }
 
+    /// Removes all but the first of consecutive elements in the vector that resolve to
+    /// the same key.
+    ///
+    /// If the vector is sorted, this removes all duplicates.
     #[inline]
     pub fn dedup_by_key<F, K>(&mut self, mut key_f: F)
     where
@@ -551,6 +582,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.dedup_by(|a, b| key_f(a) == key_f(b))
     }
 
+    /// Extract a range of items from this vector, returning an iterator over
+    /// the extracted items. If this iterator is dropped
     #[inline]
     pub fn drain<R>(&mut self, range: R) -> Drain<'_, C::Buffer<T>>
     where
@@ -560,6 +593,9 @@ impl<T, C: VecConfig> Vec<T, C> {
         Drain::new(&mut self.buffer, range)
     }
 
+    /// Clone each entry in `items` and push it onto this vector.
+    ///
+    /// This method will panic on any storage errors.
     pub fn extend_from_slice(&mut self, items: &[T])
     where
         T: Clone,
@@ -573,6 +609,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to clone each entry in `items` and push it onto this vector.
+    ///
+    /// Capacity is allocated up-front, so if a `Err(StorageError)` is returned
+    /// then no items will have been appended.
     pub fn try_extend_from_slice(&mut self, items: &[T]) -> Result<(), StorageError>
     where
         T: Clone,
@@ -584,6 +624,9 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// Clone each existing entry in `range` and push it onto this vector.
+    ///
+    /// This method will panic on any storage errors.
     pub fn extend_from_within<R>(&mut self, range: R)
     where
         R: RangeBounds<C::Index>,
@@ -605,6 +648,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to clone each existing entry in `range` and push it onto this vector.
+    ///
+    /// Capacity is allocated up-front, so if a `Err(StorageError)` is returned
+    /// then no items will have been appended.
     pub fn try_extend_from_within<R>(&mut self, range: R) -> Result<(), StorageError>
     where
         R: RangeBounds<C::Index>,
@@ -674,7 +721,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
-    fn from_iter_in<A, I>(iter: A, alloc_in: I) -> Self
+    /// Create a `Vec<T, C>` from an iterator, given an allocation target.
+    pub fn from_iter_in<A, I>(iter: A, alloc_in: I) -> Self
     where
         A: IntoIterator<Item = T>,
         I: VecNewIn<T, Config = C>,
@@ -689,6 +737,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         vec
     }
 
+    /// Inserts an element at position `index` within the vector, shifting all elements
+    /// after it to the right.
+    ///
+    /// Panics if `index` is out of bounds or a storage error occurs.
     pub fn insert(&mut self, index: C::Index, value: T) {
         match self.try_insert(index, value) {
             Ok(_) => (),
@@ -696,6 +748,10 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to insert an element at position `index` within the vector, shifting all
+    /// elements after it to the right.
+    ///
+    /// Panics if `index` is out of bounds.
     pub fn try_insert(&mut self, index: C::Index, value: T) -> Result<(), InsertionError<T>> {
         let prev_len = self.buffer.length();
         if index > prev_len {
@@ -719,17 +775,25 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
-    pub fn insert_slice(&mut self, index: C::Index, values: &[T])
+    /// Clone the elements of `other` and insert them at position `index`, moving existing
+    /// elements to the right.
+    ///
+    /// Panics if `index` is out of bounds or on storage errors.
+    pub fn insert_slice(&mut self, index: C::Index, other: &[T])
     where
         T: Clone,
     {
-        match self.try_insert_slice(index, values) {
+        match self.try_insert_slice(index, other) {
             Ok(_) => (),
             Err(error) => error.panic(),
         }
     }
 
-    pub fn try_insert_slice(&mut self, index: C::Index, values: &[T]) -> Result<(), StorageError>
+    /// Try to clone the elements of `other` and insert them at position `index`,
+    /// moving existing elements to the right.
+    ///
+    /// Panics if `index` is out of bounds.
+    pub fn try_insert_slice(&mut self, index: C::Index, other: &[T]) -> Result<(), StorageError>
     where
         T: Clone,
     {
@@ -738,7 +802,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         if index > prev_len {
             index_panic();
         }
-        let ins_count = values.len();
+        let ins_count = other.len();
         if ins_count == 0 {
             return Ok(());
         }
@@ -750,7 +814,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
         let mut insert =
             Inserter::for_buffer_with_range(&mut self.buffer, index, ins_count, tail_count);
-        for item in values {
+        for item in other {
             insert.push_clone(item);
         }
         insert.complete();
@@ -762,6 +826,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// Remove the last item from the vector, if any, and return it.
     pub fn pop(&mut self) -> Option<T> {
         let mut tail = self.buffer.length().to_usize();
         if tail > 0 {
@@ -773,6 +838,9 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Append a new item to the end of the vector.
+    ///
+    /// This method will panic on any storage errors.
     pub fn push(&mut self, item: T) {
         match self._try_reserve(1, false) {
             Ok(_) => (),
@@ -783,10 +851,27 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Appends an element if there is sufficient spare capacity, otherwise an error is
+    /// returned containing the element.
+    ///
+    /// Unlike `push` this method will not reallocate when there’s insufficient capacity.
+    /// The caller should use `reserve` or `try_reserve` to ensure that there is enough
+    /// capacity.    
     pub fn push_within_capacity(&mut self, item: T) -> Result<(), T> {
-        self.try_push(item).map_err(|e| e.value)
+        if self.len() < self.capacity() {
+            unsafe {
+                self.push_unchecked(item);
+            }
+            Ok(())
+        } else {
+            Err(item)
+        }
     }
 
+    /// Try to append a new item to the end of the vector, returning an
+    /// `InsertionError<T>` if sufficient capacity cannot be located.
+    ///
+    /// This method will panic on any storage errors.
     pub fn try_push(&mut self, item: T) -> Result<(), InsertionError<T>> {
         if let Err(error) = self._try_reserve(1, false) {
             return Err(InsertionError::new(error, item));
@@ -797,8 +882,12 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// Append an item to the end of the vector without adjusting or checking the
+    /// capacity.
+    ///
     /// # Safety
-    /// The buffer must have sufficient capacity for one more item.
+    /// The buffer must have sufficient capacity for one more item, otherwise
+    /// memory access errors may occur.
     #[inline]
     pub unsafe fn push_unchecked(&mut self, item: T) {
         let length = self.buffer.length().to_usize();
@@ -806,6 +895,15 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.buffer.set_length(C::Index::from_usize(length + 1));
     }
 
+    /// Removes and returns the element at position `index` within the vector, shifting
+    /// all elements after it to the left.
+    ///
+    /// Note: Because this shifts over the remaining elements, it has a worst-case performance of
+    /// `O(n)`. If you don’t need the order of elements to be preserved, use `swap_remove` instead.
+    /// If you’d like to remove elements from the beginning of the Vec, consider using
+    /// `VecDeque::pop_front` instead.
+    ///
+    /// Panics if `index` is out of bounds.
     pub fn remove(&mut self, index: C::Index) -> T {
         let len = self.buffer.length().to_usize();
         let index = index.to_usize();
@@ -824,6 +922,16 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Resizes the vector in-place so that the length is equal to `new_len`.
+    ///
+    /// If `new_len` is greater than the current length, the vector is extended by the
+    /// difference, with each additional slot filled with `value`. If `new_len` is less
+    /// than the current length, the vector is simply truncated.
+    ///
+    /// This method requires `T` to implement `Clone`, in order to be able to clone the
+    /// passed value. If you need more flexibility (or want to rely on `Default` instead
+    /// of `Clone`), use `Vec::resize_with`. If you only need to resize to a smaller size,
+    /// use `Vec::truncate`.
     #[inline]
     pub fn resize(&mut self, new_len: C::Index, value: T)
     where
@@ -835,6 +943,19 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Attempts to resizes the vector in-place so that the length is equal to `new_len`.
+    ///
+    /// If `new_len` is greater than the current length, the vector is extended by the
+    /// difference, with each additional slot filled with `value`. If `new_len` is less
+    /// than the current length, the vector is simply truncated.
+    ///
+    /// This method requires `T` to implement `Clone`, in order to be able to clone the
+    /// passed value. If you need more flexibility (or want to rely on `Default` instead
+    /// of `Clone`), use `Vec::resize_with`. If you only need to resize to a smaller size,
+    /// use `Vec::truncate`.
+    ///
+    /// A storage error may be returned if additional capacity is required but cannot be
+    /// provided by the associated allocator.
     pub fn try_resize(&mut self, new_len: C::Index, value: T) -> Result<(), StorageError>
     where
         T: Clone,
@@ -860,6 +981,17 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// Resizes the vector in-place so that the length is equal to `new_len`.
+    ///
+    /// If `new_len` is greater than the current length, the vector is extended by the
+    /// difference, with each additional slot filled with the result of calling the
+    /// closure `f`. The return values from `f` will end up in the vector in the order
+    /// they have been generated. If `new_len` is less than len, the Vec is simply
+    /// truncated.
+    ///
+    /// This method uses a closure to create new values on every push. If you’d rather
+    /// `Clone` a given value, use `Vec::resize`. If you want to use the `Default` trait
+    /// to generate values, you can pass `Default::default` as the second argument.
     #[inline]
     pub fn resize_with<F>(&mut self, new_len: C::Index, f: F)
     where
@@ -871,6 +1003,20 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Attempts to resize the vector in-place so that the length is equal to `new_len`.
+    ///
+    /// If `new_len` is greater than the current length, the vector is extended by the
+    /// difference, with each additional slot filled with the result of calling the
+    /// closure `f`. The return values from `f` will end up in the vector in the order
+    /// they have been generated. If `new_len` is less than len, the Vec is simply
+    /// truncated.
+    ///
+    /// This method uses a closure to create new values on every push. If you’d rather
+    /// `Clone` a given value, use `Vec::resize`. If you want to use the `Default` trait
+    /// to generate values, you can pass `Default::default` as the second argument.
+    ///
+    /// A storage error may be returned if additional capacity is required but cannot be
+    /// provided by the associated allocator.
     pub fn try_resize_with<F>(&mut self, new_len: C::Index, mut f: F) -> Result<(), StorageError>
     where
         F: FnMut() -> T,
@@ -896,6 +1042,11 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all elements `e` for which `f(&e)` returns `false`.
+    /// This method operates in place, visiting each element exactly once in the
+    /// original order, and preserves the order of the retained elements.
     #[inline]
     pub fn retain<F>(&mut self, mut f: F)
     where
@@ -904,6 +1055,12 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.retain_mut(|r| f(r))
     }
 
+    /// Retains only the elements specified by the predicate, passing a mutable reference
+    /// to the element.
+    ///
+    /// In other words, remove all elements `e` for which `f(&mut e)` returns `false`.
+    /// This method operates in place, visiting each element exactly once in the
+    /// original order, and preserves the order of the retained elements.
     pub fn retain_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut T) -> bool,
@@ -936,6 +1093,12 @@ impl<T, C: VecConfig> Vec<T, C> {
         unsafe { self.buffer.set_length(C::Index::from_usize(len)) };
     }
 
+    /// Shrinks the capacity of the vector with a lower bound.
+    ///
+    /// The capacity will remain at least as large as both the current length and the
+    /// supplied `min_capacity`.
+    ///
+    /// If the current capacity is less than the lower limit, this is a no-op.
     #[inline]
     pub fn shrink_to(&mut self, min_capacity: C::Index) {
         match self.try_shrink_to(min_capacity) {
@@ -944,6 +1107,14 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Tries to shrink the capacity of the vector with a lower bound.
+    ///
+    /// The capacity will remain at least as large as both the current length and the
+    /// supplied `min_capacity`.
+    ///
+    /// If the current capacity is less than the lower limit, this is a no-op.
+    /// A storage error may be returned if reallocation is required but cannot be
+    /// performed by the associated allocator.
     pub fn try_shrink_to(&mut self, min_capacity: C::Index) -> Result<(), StorageError> {
         let len = self.buffer.length().max(min_capacity);
         if self.buffer.capacity() != len {
@@ -952,6 +1123,11 @@ impl<T, C: VecConfig> Vec<T, C> {
         Ok(())
     }
 
+    /// Shrinks the capacity of the vector as much as possible.
+    ///
+    /// The behavior of this method depends on the allocator, which may either shrink
+    /// the vector in-place or reallocate. The resulting vector might still have some
+    /// excess capacity, just as is the case for `with_capacity`.
     #[inline]
     pub fn shrink_to_fit(&mut self) {
         match self.try_shrink_to_fit() {
@@ -960,17 +1136,40 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Try to shrinks the capacity of the vector as much as possible.
+    ///
+    /// The behavior of this method depends on the allocator, which may either shrink
+    /// the vector in-place or reallocate. The resulting vector might still have some
+    /// excess capacity, just as is the case for `with_capacity`.
+    /// A storage error may be returned if reallocation is required but cannot be
+    /// performed by the associated allocator.
     #[inline]
     pub fn try_shrink_to_fit(&mut self) -> Result<(), StorageError> {
         self.try_shrink_to(self.buffer.length())
     }
 
+    /// Access the remaining spare capacity of the vector as a mutable slice of
+    /// `MaybeUninit<T>`.
+    ///
+    /// The returned slice can be used to fill the vector with data (e.g. by
+    /// reading from a file) before marking the data as initialized using the
+    /// `set_len` method.
     #[inline]
     pub fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         let length = self.len().into();
         &mut self.buffer.as_uninit_slice()[length..]
     }
 
+    /// Returns vector content as a mutable slice of `T`, along with the remaining
+    /// spare capacity of the vector as a mutable slice of `MaybeUninit<T>`.
+    ///
+    /// The returned spare capacity slice can be used to fill the vector with data (e.g.
+    /// by reading from a file) before marking the data as initialized using the `set_len`
+    /// method.
+    /// Note that this is a low-level API, which should be used with care for optimization
+    /// purposes. If you need to append data to a Vec you can use `push`, `extend`,
+    /// `extend_from_slice`, `extend_from_within`, `insert`, `append`, `resize` or
+    /// `resize_with`, depending on your exact needs.
     pub fn split_at_spare_mut(&mut self) -> (&mut [T], &mut [MaybeUninit<T>]) {
         let length = self.len().into();
         let (data, spare) = self.buffer.as_uninit_slice().split_at_mut(length);
@@ -980,6 +1179,20 @@ impl<T, C: VecConfig> Vec<T, C> {
         )
     }
 
+    /// Splits the collection into two at the given index.
+    ///
+    /// Returns a new vector instance containing the elements in the range `[at, len)`.
+    /// After the call, the original vector will be left containing the elements
+    /// `[0, at)` with its previous capacity unchanged.
+    ///
+    /// If you want to take ownership of the entire contents and capacity of the vector,
+    /// see `mem::take` or `mem::replace`.
+    ///
+    /// If you don’t need the returned vector at all, see `Vec::truncate`.
+    /// If you want to take ownership of an arbitrary subslice, or you don’t necessarily
+    /// want to store the removed items in a vector, see `Vec::drain`.
+    ///
+    /// Panics if `at` is out of bounds.
     pub fn split_off(&mut self, index: C::Index) -> Self
     where
         C: VecConfigSpawn<T>,
@@ -990,7 +1203,7 @@ impl<T, C: VecConfig> Vec<T, C> {
             index_panic();
         }
         let move_len = C::Index::from_usize(len - index_usize);
-        match C::vec_try_spawn(&self.buffer, move_len, false) {
+        match C::vec_buffer_try_spawn(&self.buffer, move_len, false) {
             Ok(mut buffer) => {
                 if index_usize == 0 {
                     mem::swap(&mut buffer, &mut self.buffer);
@@ -1012,6 +1225,19 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
+    /// Creates a splicing iterator that replaces the specified range in the vector
+    /// with the given `replace_with` iterator and yields the removed items.
+    ///
+    /// `replace_with` does not need to be the same length as range.
+    /// range is removed even if the iterator is not consumed until the end.
+    ///
+    /// It is unspecified how many elements are removed from the vector if the
+    /// `Splice` value is leaked.
+    /// The input iterator `replace_with` is only consumed when the `Splice` value
+    /// is dropped.
+    ///
+    /// Panics if the starting point is greater than the end point or if the end point
+    /// is greater than the length of the vector.
     pub fn splice<R, I>(
         &mut self,
         range: R,
@@ -1025,6 +1251,14 @@ impl<T, C: VecConfig> Vec<T, C> {
         Splice::new(&mut self.buffer, replace_with.into_iter(), range)
     }
 
+    /// Removes an element from the vector and returns it.
+    ///
+    /// The removed element is replaced by the last element of the vector.
+    ///
+    /// This does not preserve ordering of the remaining elements, but is `O(1)`. If you
+    /// need to preserve the element order, use `remove` or `pop` instead.
+    ///
+    /// Panics if `index` is out of bounds.
     pub fn swap_remove(&mut self, index: C::Index) -> T {
         let index: usize = index.to_usize();
         let length: usize = self.buffer.length().to_usize();
@@ -1042,6 +1276,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         result
     }
 
+    /// Reduce the length of this vector to at most `length`, dropping any items
+    /// with an index `>= length`. The capacity of the vector is unchanged.
     pub fn truncate(&mut self, length: C::Index) {
         let old_len: usize = self.len().to_usize();
         let new_len = length.to_usize().min(old_len);
@@ -1089,7 +1325,7 @@ impl<T, C: VecConfig> BorrowMut<[T]> for Vec<T, C> {
 impl<T: Clone, C: VecConfigSpawn<T>> Clone for Vec<T, C> {
     fn clone(&self) -> Self {
         let mut inst = Self {
-            buffer: match C::vec_try_spawn(&self.buffer, self.buffer.length(), false) {
+            buffer: match C::vec_buffer_try_spawn(&self.buffer, self.buffer.length(), false) {
                 Ok(buf) => buf,
                 Err(err) => err.panic(),
             },
@@ -1280,32 +1516,32 @@ where
     C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
 {
     fn from(vec: Vec<T, C>) -> Self {
-        let (data, length, capacity, alloc) = C::vec_into_parts(vec.into_inner());
+        let (data, length, capacity, alloc) = C::vec_buffer_into_parts(vec.into_inner());
         unsafe {
             allocator_api2::vec::Vec::from_raw_parts_in(data.as_ptr(), length, capacity, alloc)
         }
     }
 }
 
-// #[cfg(feature = "alloc")]
-// impl<'b, T: Clone, S> From<alloc::borrow::Cow<'b, [T]>> for Vec<T, S>
-// where
-//     S: StorageNew + StorageWithAlloc,
-// {
-//     fn from(cow: alloc::borrow::Cow<'b, [T]>) -> Self {
-//         match cow {
-//             alloc::borrow::Cow::Borrowed(data) => Vec::<T, S>::from_slice(data),
-//             alloc::borrow::Cow::Owned(vec) => vec.into(),
-//         }
-//     }
-// }
+#[cfg(feature = "alloc")]
+impl<'b, T: Clone, C> From<alloc::borrow::Cow<'b, [T]>> for Vec<T, C>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(cow: alloc::borrow::Cow<'b, [T]>) -> Self {
+        cow.into_owned().into()
+    }
+}
 
-// #[cfg(feature = "alloc")]
-// impl<'b, T: Clone, S: StorageWithAlloc> From<Vec<T, S>> for alloc::borrow::Cow<'b, [T]> {
-//     fn from(vec: Vec<T, S>) -> alloc::borrow::Cow<'b, [T]> {
-//         alloc::borrow::Cow::Owned(alloc::vec::Vec::from(vec))
-//     }
-// }
+#[cfg(feature = "alloc")]
+impl<'b, T: Clone, C> From<Vec<T, C>> for alloc::borrow::Cow<'b, [T]>
+where
+    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: Vec<T, C>) -> alloc::borrow::Cow<'b, [T]> {
+        alloc::borrow::Cow::Owned(vec.into())
+    }
+}
 
 impl<T: Clone, C: VecConfigNew<T>> From<&[T]> for Vec<T, C> {
     #[inline]

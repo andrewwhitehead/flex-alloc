@@ -10,6 +10,7 @@ use crate::index::Index;
 use super::buffer::VecBuffer;
 use super::index_panic;
 
+/// A struct used for draining items from a Vec as an iterator.
 pub struct Drain<'d, B: VecBuffer> {
     pub(super) range: Range<usize>,
     pub(super) remain: Range<usize>,
@@ -36,7 +37,8 @@ impl<'d, B: VecBuffer> Drain<'d, B> {
         }
     }
 
-    pub fn as_slice(&self) -> &[B::Data] {
+    /// Access the remaining items as a slice reference.
+    pub fn as_slice(&self) -> &[B::Item] {
         unsafe {
             slice::from_raw_parts(
                 self.buf.data_ptr().add(self.remain.start),
@@ -45,7 +47,8 @@ impl<'d, B: VecBuffer> Drain<'d, B> {
         }
     }
 
-    pub fn as_mut_slice(&mut self) -> &mut [B::Data] {
+    /// Access the remaining items as a mutable slice reference.
+    pub fn as_mut_slice(&mut self) -> &mut [B::Item] {
         unsafe {
             slice::from_raw_parts_mut(
                 self.buf.data_ptr_mut().add(self.remain.start),
@@ -54,10 +57,12 @@ impl<'d, B: VecBuffer> Drain<'d, B> {
         }
     }
 
+    /// Check if there are remaining items in the iterator.
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Get the number of remaining items in the iterator.
     pub const fn len(&self) -> usize {
         self.remain.end - self.remain.start
     }
@@ -72,6 +77,7 @@ impl<'d, B: VecBuffer> Drain<'d, B> {
         }
     }
 
+    /// Abort the drain operation, leaving the remaining items contained in the `Vec` instance.
     pub fn keep_rest(mut self) {
         let len = self.len();
         let shift = self.remain.start - self.range.start;
@@ -89,15 +95,15 @@ impl<'d, B: VecBuffer> Drain<'d, B> {
     }
 }
 
-impl<'d, B: VecBuffer> AsRef<[B::Data]> for Drain<'d, B> {
-    fn as_ref(&self) -> &[B::Data] {
+impl<'d, B: VecBuffer> AsRef<[B::Item]> for Drain<'d, B> {
+    fn as_ref(&self) -> &[B::Item] {
         self.as_slice()
     }
 }
 
 impl<'d, B: VecBuffer> fmt::Debug for Drain<'d, B>
 where
-    B::Data: Debug,
+    B::Item: Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Drain").field(&self.as_slice()).finish()
@@ -105,7 +111,7 @@ where
 }
 
 impl<'d, B: VecBuffer> Iterator for Drain<'d, B> {
-    type Item = B::Data;
+    type Item = B::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.remain.start;

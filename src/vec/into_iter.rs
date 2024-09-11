@@ -7,7 +7,7 @@ use crate::index::Index;
 
 use super::buffer::VecBuffer;
 
-/// A struct used for extracting all items from a Vec as an iterator
+/// A struct used for extracting all items from a Vec as an iterator.
 #[derive(Debug)]
 pub struct IntoIter<B: VecBuffer> {
     remain: Range<usize>,
@@ -27,8 +27,8 @@ impl<B: VecBuffer> IntoIter<B> {
         }
     }
 
-    /// Access the remaining items as a slice reference
-    pub fn as_slice(&self) -> &[B::Data] {
+    /// Access the remaining items as a slice reference.
+    pub fn as_slice(&self) -> &[B::Item] {
         unsafe {
             slice::from_raw_parts(
                 self.buf.data_ptr().add(self.remain.start),
@@ -37,8 +37,8 @@ impl<B: VecBuffer> IntoIter<B> {
         }
     }
 
-    /// Access the remaining items as a mutable slice reference
-    pub fn as_mut_slice(&mut self) -> &mut [B::Data] {
+    /// Access the remaining items as a mutable slice reference.
+    pub fn as_mut_slice(&mut self) -> &mut [B::Item] {
         unsafe {
             slice::from_raw_parts_mut(
                 self.buf.data_ptr_mut().add(self.remain.start),
@@ -47,16 +47,17 @@ impl<B: VecBuffer> IntoIter<B> {
         }
     }
 
-    /// Check if there are remaining items in the iterator
+    /// Check if there are remaining items in the iterator.
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Get the number of remaining items in the iterator
+    /// Get the number of remaining items in the iterator.
     pub const fn len(&self) -> usize {
         self.remain.end - self.remain.start
     }
 
+    /// Drop any remaining items and set the remaining item count to zero.
     fn clear(&mut self) {
         let remain_len = self.len();
         if remain_len > 0 {
@@ -68,20 +69,20 @@ impl<B: VecBuffer> IntoIter<B> {
     }
 }
 
-impl<B: VecBuffer> AsRef<[B::Data]> for IntoIter<B> {
-    fn as_ref(&self) -> &[B::Data] {
+impl<B: VecBuffer> AsRef<[B::Item]> for IntoIter<B> {
+    fn as_ref(&self) -> &[B::Item] {
         self.as_slice()
     }
 }
 
-impl<B: VecBuffer> AsMut<[B::Data]> for IntoIter<B> {
-    fn as_mut(&mut self) -> &mut [B::Data] {
+impl<B: VecBuffer> AsMut<[B::Item]> for IntoIter<B> {
+    fn as_mut(&mut self) -> &mut [B::Item] {
         self.as_mut_slice()
     }
 }
 
 impl<B: VecBuffer> Iterator for IntoIter<B> {
-    type Item = B::Data;
+    type Item = B::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.remain.start;
