@@ -6,6 +6,8 @@ use core::{
     ops::Deref,
 };
 
+use const_default::ConstDefault;
+
 use crate::error::StorageError;
 use crate::storage::{RawAlloc, RawAllocIn};
 
@@ -173,6 +175,14 @@ where
             (t, s) => *t = s.clone(),
         }
     }
+}
+
+impl<T, A: RawAlloc> ConstDefault for Cow<'_, T, A>
+where
+    T: ToOwnedIn<A> + ?Sized,
+    T::Owned: ConstDefault,
+{
+    const DEFAULT: Self = Self::Owned(T::Owned::DEFAULT);
 }
 
 impl<T, A: RawAlloc> Debug for Cow<'_, T, A>

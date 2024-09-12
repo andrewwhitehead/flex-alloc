@@ -50,13 +50,15 @@ impl<'a, T: Clone, A: RawAllocDefault> FromIterator<T> for Cow<'a, [T], A> {
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::Global;
+    use const_default::ConstDefault;
+
     #[cfg(feature = "alloc")]
     use super::*;
 
     #[cfg(feature = "alloc")]
     #[test]
     fn cow_borrow_vec() {
-        use crate::storage::Global;
         let mut b = Cow::<[u32], Global>::default();
         assert!(b.is_owned());
         b.to_mut().push(1);
@@ -65,5 +67,11 @@ mod tests {
         let b = Cow::<[u32], Global>::from(&[1, 2, 3]);
         assert!(b.is_borrowed());
         assert_eq!(b.into_owned(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn const_default_cow() {
+        let c = Cow::<[u32], Global>::DEFAULT;
+        assert_eq!(c.as_ref(), &[]);
     }
 }

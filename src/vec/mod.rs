@@ -13,6 +13,8 @@ use core::slice;
 #[cfg(feature = "alloc")]
 use core::ptr::NonNull;
 
+use const_default::ConstDefault;
+
 use crate::error::{InsertionError, StorageError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
@@ -1338,6 +1340,10 @@ impl<T: Clone, C: VecConfigSpawn<T>> Clone for Vec<T, C> {
         self.truncate(C::Index::ZERO);
         self.extend_from_slice(source);
     }
+}
+
+impl<T, C: VecConfigNew<T>> ConstDefault for Vec<T, C> {
+    const DEFAULT: Self = Self::new();
 }
 
 impl<T: fmt::Debug, C: VecConfig> fmt::Debug for Vec<T, C> {
