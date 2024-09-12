@@ -5,6 +5,7 @@ use core::mem::{size_of, size_of_val};
 
 use rstest::rstest;
 
+#[cfg(feature = "alloc")]
 use const_default::ConstDefault;
 use flex_alloc::{
     index::Index,

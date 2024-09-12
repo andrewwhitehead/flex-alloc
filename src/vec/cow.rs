@@ -50,7 +50,10 @@ impl<'a, T: Clone, A: RawAllocDefault> FromIterator<T> for Cow<'a, [T], A> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "alloc")]
     use crate::storage::Global;
+
+    #[cfg(feature = "alloc")]
     use const_default::ConstDefault;
 
     #[cfg(feature = "alloc")]
@@ -69,6 +72,7 @@ mod tests {
         assert_eq!(b.into_owned(), &[1, 2, 3]);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn const_default_cow() {
         let c = Cow::<[u32], Global>::DEFAULT;
