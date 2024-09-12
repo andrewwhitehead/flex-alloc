@@ -10,9 +10,10 @@ pub(crate) mod utils;
 #[cfg(feature = "zeroize")]
 pub(crate) mod zero;
 
-pub use self::alloc::{
-    FixedAlloc, Global, RawAlloc, RawAllocIn, RawAllocNew, SpillAlloc, SpillStorage, Thin,
-};
+use const_default::ConstDefault;
+
+pub use self::alloc::{FixedAlloc, Global, RawAlloc, RawAllocIn, SpillAlloc, SpillStorage, Thin};
+use crate::error::StorageError;
 
 #[cfg(feature = "zeroize")]
 pub use self::zero::ZeroizingAlloc;
@@ -154,8 +155,17 @@ pub struct InlineBuffer<T, const N: usize> {
 }
 
 impl<T, const N: usize> InlineBuffer<T, N> {
-    /// Constant initializer.
-    pub const DEFAULT: Self = Self {
+    pub(crate) fn try_for_capacity(capacity: usize, exact: bool) -> Result<Self, StorageError> {
+        if (!exact && capacity < N) || capacity == N {
+            Ok(Self::DEFAULT)
+        } else {
+            Err(StorageError::CapacityLimit)
+        }
+    }
+}
+
+impl<T, const N: usize> ConstDefault for InlineBuffer<T, N> {
+    const DEFAULT: Self = Self {
         storage: ArrayStorage::DEFAULT,
         length: 0,
     };

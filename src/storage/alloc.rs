@@ -4,6 +4,8 @@ use core::marker::PhantomData;
 use core::mem::{align_of, ManuallyDrop};
 use core::ptr::{self, NonNull};
 
+use const_default::ConstDefault;
+
 #[cfg(all(feature = "alloc", feature = "allocator-api2"))]
 pub use allocator_api2::alloc::{Allocator, Global};
 
@@ -109,9 +111,11 @@ impl<A: RawAlloc> RawAllocIn for A {
 }
 
 /// A trait implemented by allocators supporting a constant initializer.
-pub trait RawAllocNew: RawAlloc + Clone {
-    /// The constant initializer for this allocator
-    const NEW: Self;
+/// This cannot use ConstDefault as it is not implemented for the external
+/// `Global` allocator.
+pub trait RawAllocDefault: RawAlloc + Clone + Default {
+    /// The constant initializer for this allocator.
+    const DEFAULT: Self;
 }
 
 /// The standard heap allocator. When the `alloc` feature is not enabled,
@@ -181,8 +185,8 @@ impl RawAlloc for Global {
 }
 
 #[cfg(feature = "alloc")]
-impl RawAllocNew for Global {
-    const NEW: Self = Global;
+impl RawAllocDefault for Global {
+    const DEFAULT: Self = Global;
 }
 
 pub trait AllocHeader: Copy + Clone + Sized {
@@ -245,15 +249,10 @@ pub trait AllocHandle: RawBuffer<RawData = <Self::Meta as AllocLayout>::Data> {
     }
 }
 
-pub trait AllocHandleNew: AllocHandle {
-    const NEW: Self;
-    const NEW_ALLOC: Self::Alloc;
-}
-
-pub type AllocParts<Handle> = (
-    <<Handle as AllocHandle>::Meta as AllocLayout>::Header,
-    NonNull<<<Handle as AllocHandle>::Meta as AllocLayout>::Data>,
-    <Handle as AllocHandle>::Alloc,
+pub type AllocParts<Meta, Alloc> = (
+    <Meta as AllocLayout>::Header,
+    NonNull<<Meta as AllocLayout>::Data>,
+    Alloc,
 );
 
 pub trait AllocHandleParts: AllocHandle {
@@ -263,7 +262,7 @@ pub trait AllocHandleParts: AllocHandle {
         alloc: Self::Alloc,
     ) -> Self;
 
-    fn handle_into_parts(self) -> AllocParts<Self>;
+    fn handle_into_parts(self) -> AllocParts<Self::Meta, Self::Alloc>;
 }
 
 /// An allocation handle which stores the header metadata within.
@@ -345,7 +344,7 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for FatAllocHandle<Meta, Al
     #[inline]
     fn alloc_handle_in<A>(
         alloc_in: A,
-        mut header: <Self::Meta as AllocLayout>::Header,
+        mut header: <Meta as AllocLayout>::Header,
         exact: bool,
     ) -> Result<Self, StorageError>
     where
@@ -395,16 +394,18 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for FatAllocHandle<Meta, Al
     }
 }
 
-impl<Meta: AllocLayout, Alloc: RawAllocNew> AllocHandleNew for FatAllocHandle<Meta, Alloc> {
-    const NEW: Self = Self::dangling(Meta::Header::EMPTY, Self::NEW_ALLOC);
-    const NEW_ALLOC: Self::Alloc = Alloc::NEW;
+impl<Meta: AllocLayout, Alloc> ConstDefault for FatAllocHandle<Meta, Alloc>
+where
+    Alloc: RawAllocDefault,
+{
+    const DEFAULT: Self = Self::dangling(Meta::Header::EMPTY, Alloc::DEFAULT);
 }
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandleParts for FatAllocHandle<Meta, Alloc> {
     #[inline]
     fn handle_from_parts(
-        header: <Self::Meta as AllocLayout>::Header,
-        data: NonNull<<Self::Meta as AllocLayout>::Data>,
+        header: <Meta as AllocLayout>::Header,
+        data: NonNull<<Meta as AllocLayout>::Data>,
         alloc: Self::Alloc,
     ) -> Self {
         Self {
@@ -418,8 +419,8 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandleParts for FatAllocHandle<Met
     fn handle_into_parts(
         self,
     ) -> (
-        <Self::Meta as AllocLayout>::Header,
-        NonNull<<Self::Meta as AllocLayout>::Data>,
+        <Meta as AllocLayout>::Header,
+        NonNull<<Meta as AllocLayout>::Data>,
         Self::Alloc,
     ) {
         let slf = ManuallyDrop::new(self);
@@ -554,19 +555,19 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
     }
 
     #[inline]
-    unsafe fn header(&self) -> &<Self::Meta as AllocLayout>::Header {
+    unsafe fn header(&self) -> &<Meta as AllocLayout>::Header {
         &*self.data.header_ptr()
     }
 
     #[inline]
-    unsafe fn header_mut(&mut self) -> &mut <Self::Meta as AllocLayout>::Header {
+    unsafe fn header_mut(&mut self) -> &mut <Meta as AllocLayout>::Header {
         &mut *self.data.header_ptr()
     }
 
     #[inline]
     fn alloc_handle_in<A>(
         alloc_in: A,
-        mut header: <Self::Meta as AllocLayout>::Header,
+        mut header: <Meta as AllocLayout>::Header,
         exact: bool,
     ) -> Result<Self, StorageError>
     where
@@ -627,9 +628,11 @@ impl<Meta: AllocLayout, Alloc: RawAlloc> AllocHandle for ThinAllocHandle<Meta, A
     }
 }
 
-impl<Meta: AllocLayout, Alloc: RawAllocNew> AllocHandleNew for ThinAllocHandle<Meta, Alloc> {
-    const NEW: Self = Self::dangling(Self::NEW_ALLOC);
-    const NEW_ALLOC: Self::Alloc = Alloc::NEW;
+impl<Meta: AllocLayout, Alloc> ConstDefault for ThinAllocHandle<Meta, Alloc>
+where
+    Alloc: RawAllocDefault,
+{
+    const DEFAULT: Self = Self::dangling(Alloc::DEFAULT);
 }
 
 impl<Meta: AllocLayout, Alloc: RawAlloc> Drop for ThinAllocHandle<Meta, Alloc> {
@@ -697,10 +700,7 @@ pub struct SpillAlloc<'a, A> {
     _fixed: FixedAlloc<'a>,
 }
 
-impl<A: RawAlloc> Default for SpillAlloc<'_, A>
-where
-    A: Default,
-{
+impl<A: Default + RawAlloc> Default for SpillAlloc<'_, A> {
     #[inline]
     fn default() -> Self {
         Self::new(A::default(), ptr::null())
@@ -731,14 +731,14 @@ impl<A: RawAlloc> RawAlloc for SpillAlloc<'_, A> {
     }
 }
 
-impl<'a, A: RawAllocNew> Clone for SpillAlloc<'a, A> {
+impl<'a, A: Default + RawAlloc> Clone for SpillAlloc<'a, A> {
     fn clone(&self) -> Self {
-        Self::NEW
+        Self::default()
     }
 }
 
-impl<'a, A: RawAllocNew> RawAllocNew for SpillAlloc<'a, A> {
-    const NEW: Self = Self::new(A::NEW, ptr::null());
+impl<'a, A: RawAllocDefault> ConstDefault for SpillAlloc<'a, A> {
+    const DEFAULT: Self = Self::new(A::DEFAULT, ptr::null());
 }
 
 /// An allocator which consumes the provided fixed storage before deferring to the

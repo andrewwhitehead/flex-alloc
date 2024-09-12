@@ -7,7 +7,7 @@ use core::slice;
 
 use crate::error::StorageError;
 use crate::index::Index;
-use crate::storage::alloc::{AllocHandle, AllocHandleNew, AllocHeader, AllocLayout};
+use crate::storage::alloc::{AllocHandle, AllocHeader, AllocLayout};
 use crate::storage::utils::array_layout;
 use crate::storage::{InlineBuffer, RawBuffer};
 
@@ -153,59 +153,6 @@ where
     }
 }
 
-/// Support creation of a new `VecBuffer`.
-pub trait VecBufferNew: VecBufferSpawn {
-    /// A constant initializer for the buffer.
-    const NEW: Self;
-
-    /// Try to allocate a new buffer of a given capacity. The `exact` flag determines
-    /// whether a larger capacity would be acceptable.
-    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
-}
-
-impl<B> VecBufferNew for B
-where
-    B: VecBufferSpawn + AllocHandleNew<Meta = VecData<Self::Item, Self::Index>>,
-{
-    const NEW: Self = Self::NEW;
-
-    #[inline]
-    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        Self::alloc_handle_in(
-            Self::NEW_ALLOC,
-            VecHeader {
-                capacity,
-                length: Self::Index::ZERO,
-            },
-            exact,
-        )
-    }
-}
-
-/// Support spawning a new buffer from an existing `VecBuffer` reference.
-pub trait VecBufferSpawn: VecBuffer {
-    /// Try to spawn a new buffer of a given capacity. The `exact` flag determines
-    /// whether a larger capacity would be acceptable.
-    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError>;
-}
-
-impl<B, T, I: Index> VecBufferSpawn for B
-where
-    B: AllocHandle<Meta = VecData<T, I>>,
-    B::Alloc: Clone,
-{
-    #[inline]
-    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        self.spawn_handle(
-            VecHeader {
-                capacity,
-                length: Index::ZERO,
-            },
-            exact,
-        )
-    }
-}
-
 impl<'a, T: 'a, const N: usize> VecBuffer for InlineBuffer<T, N> {
     type Item = T;
     type Index = usize;
@@ -232,25 +179,5 @@ impl<'a, T: 'a, const N: usize> VecBuffer for InlineBuffer<T, N> {
         } else {
             Err(StorageError::CapacityLimit)
         }
-    }
-}
-
-impl<T, const N: usize> VecBufferNew for InlineBuffer<T, N> {
-    const NEW: Self = InlineBuffer::DEFAULT;
-
-    #[inline]
-    fn vec_try_new(capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        if (!exact && capacity.to_usize() < N) || capacity.to_usize() == N {
-            Ok(Self::NEW)
-        } else {
-            Err(StorageError::CapacityLimit)
-        }
-    }
-}
-
-impl<T, const N: usize> VecBufferSpawn for InlineBuffer<T, N> {
-    #[inline]
-    fn vec_try_spawn(&self, capacity: Self::Index, exact: bool) -> Result<Self, StorageError> {
-        Self::vec_try_new(capacity, exact)
     }
 }

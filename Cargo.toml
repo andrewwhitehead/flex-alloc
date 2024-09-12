@@ -23,6 +23,7 @@ zeroize = ["dep:zeroize"]
 
 [dependencies]
 allocator-api2 = { version = "0.2", default-features = false, optional = true }
+const-default = "1"
 zeroize = { version = "1", default-features = false, optional = true }
 
 [dev-dependencies]

@@ -6,8 +6,8 @@ use core::{
     ops::Deref,
 };
 
+use crate::error::StorageError;
 use crate::storage::{RawAlloc, RawAllocIn};
-use crate::{error::StorageError, storage::RawAllocNew};
 
 /// The owned type for a collection which may be owned or borrowed.
 pub type Owned<B, A> = <B as ToOwnedIn<A>>::Owned;
@@ -72,9 +72,9 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     #[inline]
     pub fn to_mut(&mut self) -> &mut Owned<T, A>
     where
-        A: RawAllocNew,
+        A: Default + RawAlloc,
     {
-        self.to_mut_in(A::NEW)
+        self.to_mut_in(A::default())
     }
 
     /// If necessary, convert `self` into an owned instance given an allocation target.
@@ -99,10 +99,10 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     /// owned instance.
     pub fn into_owned(self) -> Owned<T, A>
     where
-        A: RawAllocNew,
+        A: Default + RawAlloc,
     {
         match self {
-            Self::Borrowed(borrowed) => borrowed.to_owned_in(A::NEW),
+            Self::Borrowed(borrowed) => borrowed.to_owned_in(A::default()),
             Self::Owned(owned) => owned,
         }
     }
@@ -123,10 +123,10 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     /// Unwrap and return the owned instance or a storage error.
     pub fn try_into_owned(self) -> Result<Owned<T, A>, StorageError>
     where
-        A: RawAllocNew,
+        A: Default + RawAlloc,
     {
         match self {
-            Self::Borrowed(borrowed) => borrowed.try_to_owned_in(A::NEW),
+            Self::Borrowed(borrowed) => borrowed.try_to_owned_in(A::default()),
             Self::Owned(owned) => Ok(owned),
         }
     }

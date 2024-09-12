@@ -5,6 +5,7 @@ use core::mem::{size_of, size_of_val};
 
 use rstest::rstest;
 
+use const_default::ConstDefault;
 use flex_alloc::{
     index::Index,
     storage::{aligned_byte_storage, array_storage, byte_storage, Inline},

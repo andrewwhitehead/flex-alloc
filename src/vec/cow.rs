@@ -1,7 +1,8 @@
 use crate::error::StorageError;
+use crate::storage::alloc::RawAllocDefault;
 use crate::{
     borrow::{Cow, ToOwnedIn},
-    storage::{RawAlloc, RawAllocIn, RawAllocNew},
+    storage::{RawAlloc, RawAllocIn},
 };
 
 use super::Vec;
@@ -41,7 +42,7 @@ impl<'a, T: Clone, A: RawAlloc> From<&'a Vec<T, A>> for Cow<'a, [T], A> {
     }
 }
 
-impl<'a, T: Clone, A: RawAllocNew> FromIterator<T> for Cow<'a, [T], A> {
+impl<'a, T: Clone, A: RawAllocDefault> FromIterator<T> for Cow<'a, [T], A> {
     fn from_iter<I: IntoIterator<Item = T>>(it: I) -> Cow<'a, [T], A> {
         Cow::Owned(Vec::from_iter(it))
     }

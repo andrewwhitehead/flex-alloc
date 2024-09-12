@@ -6,10 +6,10 @@ use zeroize::Zeroize;
 
 use crate::error::StorageError;
 
-use super::alloc::RawAlloc;
-use super::RawAllocNew;
+use super::alloc::{RawAlloc, RawAllocDefault};
 use super::{ArrayStorage, ByteStorage, WithAlloc};
 
+/// An allocator which allocates via `A` and zeroizes all buffers when they are released.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ZeroizingAlloc<A>(pub A);
 
@@ -32,11 +32,11 @@ impl<A: RawAlloc> RawAlloc for ZeroizingAlloc<A> {
     }
 }
 
-impl<A: RawAllocNew> RawAllocNew for ZeroizingAlloc<A> {
-    const NEW: Self = ZeroizingAlloc(A::NEW);
+impl<A: RawAllocDefault> RawAllocDefault for ZeroizingAlloc<A> {
+    const DEFAULT: Self = ZeroizingAlloc(A::DEFAULT);
 }
 
-impl<A: Zeroize> Zeroize for ArrayStorage<A> {
+impl<T, const N: usize> Zeroize for ArrayStorage<T, N> {
     #[inline]
     fn zeroize(&mut self) {
         self.0.zeroize()
