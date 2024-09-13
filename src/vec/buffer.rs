@@ -74,7 +74,7 @@ pub trait VecBuffer: RawBuffer<RawData = Self::Item> {
     ///
     /// # Safety
     /// A zero length buffer may not have an active allocation, and so it is
-    /// undefined behaviour to set its length, even if setting it to zero. Doing so
+    /// undefined behavior to set its length, even if setting it to zero. Doing so
     /// may produce invalid memory access errors.
     unsafe fn set_length(&mut self, len: Self::Index);
 

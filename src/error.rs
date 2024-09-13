@@ -3,21 +3,21 @@
 use core::alloc::LayoutError;
 use core::fmt;
 
-/// An enumeration of error types raised by storage implementations
+/// An enumeration of error types raised by storage implementations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
-    /// A memory allocation failed
+    /// A memory allocation failed.
     AllocError,
-    /// The limit of the current allocation was reached
+    /// The limit of the current allocation was reached.
     CapacityLimit,
-    /// The provided layout was not allocatable
+    /// The provided layout was not allocatable.
     LayoutError(LayoutError),
-    /// The requested operation is not supported for this storage
+    /// The requested operation is not supported for this storage.
     Unsupported,
 }
 
 impl StorageError {
-    /// Generic description of this error
+    /// Generic description of this error.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::AllocError => "Allocation error",
@@ -27,7 +27,7 @@ impl StorageError {
         }
     }
 
-    /// Generate a panic with this error as the reason
+    /// Generate a panic with this error as the reason.
     #[cold]
     #[inline(never)]
     pub fn panic(self) -> ! {

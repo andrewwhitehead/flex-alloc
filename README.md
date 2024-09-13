@@ -1,8 +1,17 @@
 # flex-alloc
 
-This crate provides highly flexible storage for `std`-compatible container types (currently `Cow`, and `Vec`), going beyond what is supported by unstable features such as `allocator-api`.
+This crate provides highly flexible container types (currently `Cow`, and `Vec`) which mimic the API provided in `std`, with allocator flexibility going beyond what is supported by unstable features such as `allocator-api`.
 
 Both `no-std` as well as `no-alloc` environments are supported.
+
+## Highlights
+
+This crate currently implements a [`Vec`-compatible container](vec::Vec) with additional features:
+
+- `const` initializers.
+- Support for custom allocators, including the ability to spill from a small stack allocation to a heap allocation.
+- Custom index types and growth behavior.
+- High level integration with the `zeroize` crate for clearing sensitive information from memory.
 
 ## Feature flags
 
