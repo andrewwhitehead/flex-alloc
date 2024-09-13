@@ -133,7 +133,7 @@ use core::ptr::NonNull;
 
 use const_default::ConstDefault;
 
-use crate::error::{InsertionError, StorageError};
+use crate::error::{StorageError, UpdateError};
 use crate::index::{Grow, Index};
 use crate::storage::{Global, RawBuffer};
 
@@ -436,19 +436,20 @@ where
     pub fn into_boxed_slice(mut self) -> alloc::boxed::Box<[T]> {
         self.shrink_to_fit();
         let (data, length, capacity, _alloc) = self.into_parts();
-        assert_eq!(capacity, length);
+        assert_eq!(capacity, length, "length-capacity mismatch");
         let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length);
         unsafe { alloc::boxed::Box::from_raw(data) }
     }
 
     /// Try to convert this instance into a `Box<[T]>`. This may produce a new allocation
     /// if the length of the collection does not match its capacity.
-    ///
-    /// FIXME drops the vec on error, needs a new error type
-    pub fn try_into_boxed_slice(mut self) -> Result<alloc::boxed::Box<[T]>, StorageError> {
-        self.try_shrink_to_fit()?;
+    pub fn try_into_boxed_slice(mut self) -> Result<alloc::boxed::Box<[T]>, UpdateError<Self>> {
+        match self.try_shrink_to_fit() {
+            Ok(()) => (),
+            Err(e) => return Err(UpdateError::new(e, self)),
+        }
         let (data, length, capacity, _alloc) = self.into_parts();
-        assert_eq!(capacity, length);
+        assert_eq!(capacity, length, "length-capacity mismatch");
         let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length);
         Ok(unsafe { alloc::boxed::Box::from_raw(data) })
     }
@@ -770,8 +771,8 @@ impl<T, C: VecConfig> Vec<T, C> {
 
     /// Try to clone each existing entry in `range` and push it onto this vector.
     ///
-    /// Capacity is allocated up-front, so if a `Err(StorageError)` is returned
-    /// then no items will have been appended.
+    /// Extra capacity is allocated up-front when needed, so when a `Err(StorageError)` is
+    /// returned then no items have been appended.
     pub fn try_extend_from_within<R>(&mut self, range: R) -> Result<(), StorageError>
     where
         R: RangeBounds<C::Index>,
@@ -805,7 +806,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
     }
 
-    fn try_extend(&mut self, iter: &mut impl Iterator<Item = T>) -> Result<(), InsertionError<T>> {
+    fn try_extend(&mut self, iter: &mut impl Iterator<Item = T>) -> Result<(), UpdateError<T>> {
         loop {
             let mut insert = Inserter::for_buffer(&mut self.buffer);
             let mut full;
@@ -832,7 +833,7 @@ impl<T, C: VecConfig> Vec<T, C> {
                         unsafe { self.buffer.uninit_index(new_len) }.write(item);
                         unsafe { self.buffer.set_length(C::Index::from_usize(new_len + 1)) };
                     }
-                    Err(err) => return Err(InsertionError::new(err, item)),
+                    Err(err) => return Err(UpdateError::new(err, item)),
                 }
             } else {
                 break;
@@ -872,7 +873,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     /// elements after it to the right.
     ///
     /// Panics if `index` is out of bounds.
-    pub fn try_insert(&mut self, index: C::Index, value: T) -> Result<(), InsertionError<T>> {
+    pub fn try_insert(&mut self, index: C::Index, value: T) -> Result<(), UpdateError<T>> {
         let prev_len = self.buffer.length();
         if index > prev_len {
             index_panic();
@@ -881,7 +882,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         let tail_count = prev_len.to_usize() - index;
         match self._try_reserve(1, false) {
             Ok(_) => (),
-            Err(error) => return Err(InsertionError::new(error, value)),
+            Err(error) => return Err(UpdateError::new(error, value)),
         };
         unsafe {
             let head = self.buffer.data_ptr_mut().add(index);
@@ -992,9 +993,9 @@ impl<T, C: VecConfig> Vec<T, C> {
     /// `InsertionError<T>` if sufficient capacity cannot be located.
     ///
     /// This method will panic on any storage errors.
-    pub fn try_push(&mut self, item: T) -> Result<(), InsertionError<T>> {
+    pub fn try_push(&mut self, item: T) -> Result<(), UpdateError<T>> {
         if let Err(error) = self._try_reserve(1, false) {
-            return Err(InsertionError::new(error, item));
+            return Err(UpdateError::new(error, item));
         }
         unsafe {
             self.push_unchecked(item);

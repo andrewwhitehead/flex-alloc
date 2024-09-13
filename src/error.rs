@@ -50,22 +50,23 @@ impl From<LayoutError> for StorageError {
 #[cfg(feature = "std")]
 impl std::error::Error for StorageError {}
 
-/// An error raised by insertion operations when appropriate storage
-/// was not available. Includes the value that was to be inserted.
+/// An error raised by collection update operations when appropriate
+/// storage was not available. Includes an associated value that
+/// could not be stored or converted.
 #[derive(Clone)]
-pub struct InsertionError<T> {
+pub struct UpdateError<T> {
     pub(crate) error: StorageError,
     pub(crate) value: T,
 }
 
-impl<T> InsertionError<T> {
+impl<T> UpdateError<T> {
     pub(crate) fn new(error: StorageError, value: T) -> Self {
         Self { error, value }
     }
 
     /// Generic description of this error
     pub fn as_str(&self) -> &'static str {
-        "Insertion error"
+        "Update error"
     }
 
     /// Get a reference to the contained `StorageError`
@@ -86,20 +87,20 @@ impl<T> InsertionError<T> {
     }
 }
 
-impl<T> fmt::Debug for InsertionError<T> {
+impl<T> fmt::Debug for UpdateError<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InsertionError")
+        f.debug_struct("UpdateError")
             .field("error", &self.error)
             .finish_non_exhaustive()
     }
 }
 
-impl<T> fmt::Display for InsertionError<T> {
+impl<T> fmt::Display for UpdateError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{}: {}", self.as_str(), self.error))
     }
 }
 
 #[cfg(feature = "std")]
-impl<T> std::error::Error for InsertionError<T> {}
+impl<T> std::error::Error for UpdateError<T> {}

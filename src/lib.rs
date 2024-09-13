@@ -24,4 +24,4 @@ pub mod storage;
 
 pub mod vec;
 
-pub use self::error::{InsertionError, StorageError};
+pub use self::error::{StorageError, UpdateError};
