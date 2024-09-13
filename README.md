@@ -8,10 +8,12 @@ Both `no-std` as well as `no-alloc` environments are supported.
 
 This crate currently implements a [`Vec`-compatible container](vec::Vec) with additional features:
 
-- `const` initializers.
+- Optional `alloc` support, such that application may easily alternate between fixed buffer sizes and heap allocation.
 - Support for custom allocators, including the ability to spill from a small stack allocation to a heap allocation.
+- Additional fallible update methods, allowing for more ergonomic fixed size collections and handling of allocation errors.
+- `const` initializers.
+- Support for inline collections.
 - Custom index types and growth behavior.
-- High level integration with the `zeroize` crate for clearing sensitive information from memory.
 
 ## Feature flags
 
