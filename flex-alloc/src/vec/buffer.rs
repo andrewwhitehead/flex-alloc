@@ -2,14 +2,14 @@
 
 use core::alloc::Layout;
 use core::fmt::Debug;
-use core::mem::{size_of, MaybeUninit};
+use core::mem::MaybeUninit;
+use core::ptr::NonNull;
 use core::slice;
 
+use crate::alloc::Allocator;
 use crate::error::StorageError;
 use crate::index::Index;
-use crate::storage::alloc::{AllocHandle, AllocHeader, AllocLayout};
-use crate::storage::utils::array_layout;
-use crate::storage::{InlineBuffer, RawBuffer};
+use crate::storage::{BufferHeader, FatBuffer, InlineBuffer, RawBuffer, ThinBuffer};
 
 /// The header associated with each `Vec` instance.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,7 +20,7 @@ pub struct VecHeader<I: Index = usize> {
     pub length: I,
 }
 
-impl<I: Index> AllocHeader for VecHeader<I> {
+impl<T, I: Index> BufferHeader<T> for VecHeader<I> {
     const EMPTY: Self = VecHeader {
         capacity: I::ZERO,
         length: I::ZERO,
@@ -30,31 +30,29 @@ impl<I: Index> AllocHeader for VecHeader<I> {
     fn is_empty(&self) -> bool {
         self.capacity == I::ZERO
     }
+
+    #[inline]
+    fn layout(&self) -> Result<Layout, core::alloc::LayoutError> {
+        Layout::array::<T>(self.capacity.to_usize())
+    }
+
+    #[inline]
+    fn update_for_alloc(&mut self, ptr: NonNull<[u8]>, exact: bool) -> NonNull<T> {
+        if !exact {
+            let t_size = size_of::<T>();
+            self.capacity = if t_size > 0 {
+                I::from_usize((ptr.len() / t_size).min(I::MAX_USIZE))
+            } else {
+                I::from_usize(I::MAX_USIZE)
+            };
+        }
+        ptr.cast()
+    }
 }
 
 /// An abstract type which captures the parameters of a `Vec` type's data representation.
 #[derive(Debug)]
 pub struct VecData<T, I: Index = usize>(T, I);
-
-impl<T, I: Index> AllocLayout for VecData<T, I> {
-    type Header = VecHeader<I>;
-    type Data = T;
-
-    #[inline]
-    fn layout(header: &Self::Header) -> Result<Layout, StorageError> {
-        array_layout::<T>(header.capacity.to_usize())
-    }
-
-    #[inline]
-    fn update_header(header: &mut Self::Header, layout: Layout) {
-        let t_size = size_of::<T>();
-        header.capacity = I::from_usize(if t_size > 0 {
-            (layout.size() / t_size).min(I::MAX_USIZE)
-        } else {
-            I::MAX_USIZE
-        });
-    }
-}
 
 /// A concrete `Vec` backing buffer.
 pub trait VecBuffer: RawBuffer<RawData = Self::Item> {
@@ -112,43 +110,79 @@ pub trait VecBuffer: RawBuffer<RawData = Self::Item> {
 
     /// Attempt to resize this buffer to a new capacity. The `exact` flag determines
     /// whether a larger capacity would be acceptable.
-    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError>;
+    fn grow_buffer(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError>;
+
+    /// Attempt to resize this buffer to a new, smaller capacity.
+    fn shrink_buffer(&mut self, capacity: Self::Index) -> Result<(), StorageError>;
 }
 
-impl<B, T, I: Index> VecBuffer for B
-where
-    B: AllocHandle<Meta = VecData<T, I>>,
-{
+impl<T, I: Index, A: Allocator> VecBuffer for FatBuffer<T, VecHeader<I>, A> {
     type Item = T;
     type Index = I;
 
     #[inline]
     fn capacity(&self) -> I {
-        if self.is_empty_handle() {
-            I::ZERO
-        } else {
-            unsafe { self.header() }.capacity
-        }
+        self.header.capacity
     }
 
     #[inline]
     fn length(&self) -> I {
-        if self.is_empty_handle() {
-            I::ZERO
-        } else {
-            unsafe { self.header() }.length
-        }
+        self.header.length
     }
 
     #[inline]
     unsafe fn set_length(&mut self, len: I) {
-        self.header_mut().length = len;
+        self.header.length = len;
     }
 
     #[inline]
-    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
+    fn grow_buffer(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
         let length = self.length();
-        self.resize_handle(VecHeader { capacity, length }, exact)?;
+        self.grow(VecHeader { capacity, length }, exact)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn shrink_buffer(&mut self, capacity: Self::Index) -> Result<(), StorageError> {
+        let length = self.length();
+        self.shrink(VecHeader { capacity, length })?;
+        Ok(())
+    }
+}
+
+impl<T, I: Index, A: Allocator> VecBuffer for ThinBuffer<T, VecHeader<I>, A> {
+    type Item = T;
+    type Index = I;
+
+    #[inline]
+    fn capacity(&self) -> I {
+        self.header().capacity
+    }
+
+    #[inline]
+    fn length(&self) -> I {
+        self.header().length
+    }
+
+    #[inline]
+    unsafe fn set_length(&mut self, len: I) {
+        self.set_header(VecHeader {
+            capacity: self.capacity(),
+            length: len,
+        });
+    }
+
+    #[inline]
+    fn grow_buffer(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
+        let length = self.length();
+        self.grow(VecHeader { capacity, length }, exact)?;
+        Ok(())
+    }
+
+    #[inline]
+    fn shrink_buffer(&mut self, capacity: Self::Index) -> Result<(), StorageError> {
+        let length = self.length();
+        self.shrink(VecHeader { capacity, length })?;
         Ok(())
     }
 }
@@ -173,11 +207,16 @@ impl<'a, T: 'a, const N: usize> VecBuffer for InlineBuffer<T, N> {
     }
 
     #[inline]
-    fn vec_try_resize(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
+    fn grow_buffer(&mut self, capacity: Self::Index, exact: bool) -> Result<(), StorageError> {
         if (!exact && capacity.to_usize() < N) || capacity.to_usize() == N {
             Ok(())
         } else {
             Err(StorageError::CapacityLimit)
         }
+    }
+
+    #[inline]
+    fn shrink_buffer(&mut self, _capacity: Self::Index) -> Result<(), StorageError> {
+        Ok(())
     }
 }

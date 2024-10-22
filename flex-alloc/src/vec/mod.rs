@@ -24,7 +24,7 @@
 //!
 //! ```
 //! # #[cfg(feature = "alloc")] {
-//! use flex_alloc::{storage::{array_storage, WithAlloc}, vec::Vec};
+//! use flex_alloc::{alloc::WithAlloc, storage::array_storage, vec::Vec};
 //!
 //! let mut buf = array_storage::<_, 100>();
 //! let mut v = Vec::new_in(buf.with_alloc());
@@ -35,7 +35,7 @@
 //! ### Custom allocators
 //!
 //! Additional allocators may be defined by implementing the
-//! [`RawAlloc`][crate::storage::RawAlloc] trait. The `allocator-api2` flag also
+//! [`Allocator`][crate::alloc::Allocator] trait. The `allocator-api2` flag also
 //! enables compatibility with `allocator_api2::alloc::Allocator` implementations.
 //! See `examples/bumpalo/` for an demonstration integrating the `bumpalo` allocator.
 //!
@@ -57,12 +57,12 @@
 //!
 //! Fixed storage buffers may be wrapped in `zeroize::Zeroizing`. Allocations
 //! produced on overflow when
-//! [`WithAlloc::with_alloc`][crate::storage::WithAlloc::with_alloc] is used will
+//! [`WithAlloc::with_alloc`][crate::alloc::WithAlloc::with_alloc] is used will
 //! automatically be zeroized as well.
 //!
 //! ```
 //! # #[cfg(feature = "zeroize")] {
-//! use flex_alloc::{storage::{array_storage, WithAlloc}, vec::Vec};
+//! use flex_alloc::{alloc::WithAlloc, storage::array_storage, vec::Vec};
 //! use zeroize::Zeroizing;
 //!
 //! let mut buf = Zeroizing::new(array_storage::<usize, 10>());
@@ -113,7 +113,7 @@
 //!
 //! ```
 //! # #[cfg(feature = "alloc")] {
-//! use flex_alloc::{storage::Global, vec::{config::Custom, Vec}};
+//! use flex_alloc::{alloc::Global, vec::{config::Custom, Vec}};
 //!
 //! type Cfg = Custom<Global, u8>;
 //! let v = Vec::<usize, Cfg>::new();
@@ -125,24 +125,26 @@ use core::fmt;
 use core::iter::repeat;
 use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::ops::{Bound, Deref, DerefMut, Range, RangeBounds};
-use core::ptr;
+use core::ptr::{self, NonNull};
 use core::slice;
-
-#[cfg(feature = "alloc")]
-use core::ptr::NonNull;
 
 use const_default::ConstDefault;
 
+#[cfg(feature = "zeroize")]
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
+use crate::alloc::{AllocatorDefault, Global};
+use crate::boxed::Box;
 use crate::error::{StorageError, UpdateError};
 use crate::index::{Grow, Index};
-use crate::storage::{Global, RawBuffer};
+use crate::storage::{Inline, RawBuffer};
 
 use self::buffer::VecBuffer;
 use self::config::{VecConfig, VecConfigAlloc, VecConfigNew, VecConfigSpawn, VecNewIn};
 use self::insert::Inserter;
 
 #[cfg(feature = "alloc")]
-use self::config::VecConfigAllocParts;
+use crate::alloc::ConvertAlloc;
 
 pub use self::{drain::Drain, into_iter::IntoIter, splice::Splice};
 
@@ -159,16 +161,16 @@ mod into_iter;
 mod splice;
 
 /// A vector which stores its contained data inline, using no external allocation.
-pub type InlineVec<T, const N: usize> = Vec<T, crate::storage::Inline<N>>;
+pub type InlineVec<T, const N: usize> = Vec<T, Inline<N>>;
 
 #[cfg(feature = "alloc")]
 /// A vector which is pointer-sized, storing its capacity and length in the
 /// allocated buffer.
-pub type ThinVec<T> = Vec<T, crate::storage::Thin>;
+pub type ThinVec<T> = Vec<T, self::config::Thin<Global>>;
 
 #[cfg(feature = "zeroize")]
 /// A vector which automatically zeroizes its buffer when dropped.
-pub type ZeroizingVec<T> = Vec<T, crate::storage::ZeroizingAlloc<Global>>;
+pub type ZeroizingVec<T> = Vec<T, crate::alloc::ZeroizingAlloc<Global>>;
 
 #[cold]
 #[inline(never)]
@@ -284,7 +286,7 @@ impl<T, C: VecConfigNew<T>> Vec<T, C> {
 
     /// Try to construct a new `Vec<T, C>` with a minimum capacity.
     pub fn try_with_capacity(capacity: C::Index) -> Result<Self, StorageError> {
-        let buffer = C::vec_buffer_try_new(capacity, false)?;
+        let buffer = C::buffer_try_new(capacity, false)?;
         Ok(Self { buffer })
     }
 
@@ -335,7 +337,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     where
         A: VecNewIn<T, Config = C>,
     {
-        match A::vec_buffer_try_new_in(alloc_in, C::Index::ZERO, false) {
+        match A::buffer_try_new_in(alloc_in, C::Index::ZERO, false) {
             Ok(buffer) => Self { buffer },
             Err(err) => err.panic(),
         }
@@ -347,7 +349,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         A: VecNewIn<T, Config = C>,
     {
         Ok(Self {
-            buffer: A::vec_buffer_try_new_in(alloc_in, C::Index::ZERO, false)?,
+            buffer: A::buffer_try_new_in(alloc_in, C::Index::ZERO, false)?,
         })
     }
 
@@ -372,7 +374,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         A: VecNewIn<T, Config = C>,
     {
         Ok(Self {
-            buffer: A::vec_buffer_try_new_in(alloc_in, capacity, false)?,
+            buffer: A::buffer_try_new_in(alloc_in, capacity, false)?,
         })
     }
 
@@ -422,44 +424,72 @@ impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
     pub fn allocator(&self) -> &C::Alloc {
         C::allocator(&self.buffer)
     }
-}
 
-#[cfg(feature = "alloc")]
-impl<T, C> Vec<T, C>
-where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
-{
     /// Convert this instance into a `Box<[T]>`. This may produce a new allocation
     /// if the length of the collection does not match its capacity.
     ///
     /// This method will panic on any storage errors.
-    pub fn into_boxed_slice(mut self) -> alloc::boxed::Box<[T]> {
+    pub fn into_boxed_slice(mut self) -> Box<[T], C::Alloc> {
         self.shrink_to_fit();
-        let (data, length, capacity, _alloc) = self.into_parts();
+        let (data, length, capacity, alloc) = self.into_parts();
         assert_eq!(capacity, length, "length-capacity mismatch");
-        let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length);
-        unsafe { alloc::boxed::Box::from_raw(data) }
+        let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length.to_usize());
+        unsafe { Box::from_raw_in(data, alloc) }
     }
 
     /// Try to convert this instance into a `Box<[T]>`. This may produce a new allocation
     /// if the length of the collection does not match its capacity.
-    pub fn try_into_boxed_slice(mut self) -> Result<alloc::boxed::Box<[T]>, UpdateError<Self>> {
+    pub fn try_into_boxed_slice(mut self) -> Result<Box<[T], C::Alloc>, UpdateError<Self>> {
         match self.try_shrink_to_fit() {
             Ok(()) => (),
             Err(e) => return Err(UpdateError::new(e, self)),
         }
-        let (data, length, capacity, _alloc) = self.into_parts();
+        let (data, length, capacity, alloc) = self.into_parts();
         assert_eq!(capacity, length, "length-capacity mismatch");
-        let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length);
-        Ok(unsafe { alloc::boxed::Box::from_raw(data) })
+        let data = ptr::slice_from_raw_parts_mut(data.as_ptr(), length.to_usize());
+        Ok(unsafe { Box::from_raw_in(data, alloc) })
     }
-}
 
-#[cfg(feature = "alloc")]
-impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
+    /// Creates a `Vec<T, C>` directly from a pointer, a length, a capacity, and an allocator.
+    /// # Safety
+    /// The components must be a result of the [`into_raw_parts_with_alloc`] function.
+    #[inline]
+    pub unsafe fn from_raw_parts_in(
+        data: *mut T,
+        length: C::Index,
+        capacity: C::Index,
+        alloc: C::Alloc,
+    ) -> Self {
+        Self {
+            buffer: C::buffer_from_parts(
+                NonNull::new(data).expect("Expected non-null pointer"),
+                length,
+                capacity,
+                alloc,
+            ),
+        }
+    }
+
+    /// Decomposes a `Vec<T, C>` into its raw components: `(pointer, length, capacity, allocator)`.
+    ///
+    /// Returns the raw pointer to the underlying data, the length of the vector (in elements),
+    /// the allocated capacity of the data (in elements), and the allocator. These are the same
+    /// arguments in the same order as the arguments to [`from_raw_parts_in`].
+    ///
+    /// After calling this function, the caller is responsible for the
+    /// memory previously managed by the `Vec`. The only way to do
+    /// this is to convert the raw pointer, length, and capacity back
+    /// into a `Vec` with the [`from_raw_parts_in`] function, allowing
+    /// the destructor to perform the cleanup.
+    #[inline]
+    pub fn into_raw_parts_with_alloc(self) -> (*mut T, C::Index, C::Index, C::Alloc) {
+        let (ptr, len, cap, alloc) = C::buffer_into_parts(self.into_inner());
+        (ptr.as_ptr(), len, cap, alloc)
+    }
+
     #[inline]
     pub(crate) fn into_parts(self) -> (NonNull<T>, C::Index, C::Index, C::Alloc) {
-        C::vec_buffer_into_parts(self.into_inner())
+        C::buffer_into_parts(self.into_inner())
     }
 
     #[inline]
@@ -470,8 +500,47 @@ impl<T, C: VecConfigAllocParts<T>> Vec<T, C> {
         alloc: C::Alloc,
     ) -> Self {
         Self {
-            buffer: C::vec_buffer_from_parts(data, length, capacity, alloc),
+            buffer: C::buffer_from_parts(data, length, capacity, alloc),
         }
+    }
+}
+
+impl<T, C> Vec<T, C>
+where
+    C: VecConfigAlloc<T>,
+    C::Alloc: AllocatorDefault,
+{
+    /// Creates a `Vec<T, C>` directly from a pointer, a length, and a capacity.
+    /// # Safety
+    /// The components must be a result of the [`into_raw_parts`] function.
+    #[inline]
+    pub unsafe fn from_raw_parts(data: *mut T, length: C::Index, capacity: C::Index) -> Self {
+        Self {
+            buffer: C::buffer_from_parts(
+                NonNull::new(data).expect("Expected non-null pointer"),
+                length,
+                capacity,
+                C::Alloc::DEFAULT,
+            ),
+        }
+    }
+
+    /// Decomposes a `Vec<T, C>` into its raw components: `(pointer, length, capacity)`.
+    ///
+    /// Returns the raw pointer to the underlying data, the length of
+    /// the vector (in elements), and the allocated capacity of the
+    /// data (in elements). These are the same arguments in the same
+    /// order as the arguments to [`from_raw_parts`].
+    ///
+    /// After calling this function, the caller is responsible for the
+    /// memory previously managed by the `Vec`. The only way to do
+    /// this is to convert the raw pointer, length, and capacity back
+    /// into a `Vec` with the [`from_raw_parts`] function, allowing
+    /// the destructor to perform the cleanup.
+    #[inline]
+    pub fn into_raw_parts(self) -> (*mut T, C::Index, C::Index) {
+        let (ptr, len, cap, _alloc) = C::buffer_into_parts(self.into_inner());
+        (ptr.as_ptr(), len, cap)
     }
 }
 
@@ -509,7 +578,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         self.buffer.capacity()
     }
 
-    /// Clear the collection, dropping any contained items.
+    /// Clear the vector, dropping any contained items. This does not affect
+    /// the capacity.
     #[inline]
     pub fn clear(&mut self) {
         self.truncate(C::Index::ZERO);
@@ -590,7 +660,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         if !exact {
             capacity = C::Grow::next_capacity::<T, _>(self.buffer.capacity(), capacity);
         }
-        self.buffer.vec_try_resize(capacity, false)?;
+        self.buffer.grow_buffer(capacity, exact)?;
         Ok(())
     }
 
@@ -1239,7 +1309,7 @@ impl<T, C: VecConfig> Vec<T, C> {
     pub fn try_shrink_to(&mut self, min_capacity: C::Index) -> Result<(), StorageError> {
         let len = self.buffer.length().max(min_capacity);
         if self.buffer.capacity() != len {
-            self.buffer.vec_try_resize(len, true)?;
+            self.buffer.shrink_buffer(len)?;
         }
         Ok(())
     }
@@ -1324,7 +1394,7 @@ impl<T, C: VecConfig> Vec<T, C> {
             index_panic();
         }
         let move_len = C::Index::from_usize(len - index_usize);
-        match C::vec_buffer_try_spawn(&self.buffer, move_len, false) {
+        match C::buffer_try_spawn(&self.buffer, move_len, false) {
             Ok(mut buffer) => {
                 if index_usize == 0 {
                     mem::swap(&mut buffer, &mut self.buffer);
@@ -1446,7 +1516,7 @@ impl<T, C: VecConfig> BorrowMut<[T]> for Vec<T, C> {
 impl<T: Clone, C: VecConfigSpawn<T>> Clone for Vec<T, C> {
     fn clone(&self) -> Self {
         let mut inst = Self {
-            buffer: match C::vec_buffer_try_spawn(&self.buffer, self.buffer.length(), false) {
+            buffer: match C::buffer_try_spawn(&self.buffer, self.buffer.length(), false) {
                 Ok(buf) => buf,
                 Err(err) => err.panic(),
             },
@@ -1548,58 +1618,78 @@ unsafe impl<T: Send, C: VecConfig + Send> Send for Vec<T, C> {}
 // If a particular VecBuffer is not 'Sync' then the VecConfig type must reflect that.
 unsafe impl<T: Sync, C: VecConfig + Sync> Sync for Vec<T, C> {}
 
-#[cfg(feature = "alloc")]
-impl<T, C> From<alloc::boxed::Box<[T]>> for Vec<T, C>
-where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
-{
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T> From<alloc_crate::boxed::Box<[T]>> for Vec<T, Global> {
     #[inline]
-    fn from(vec: alloc::boxed::Box<[T]>) -> Self {
-        alloc::vec::Vec::<T>::from(vec).into()
+    fn from(vec: alloc_crate::boxed::Box<[T]>) -> Self {
+        alloc_crate::vec::Vec::<T>::from(vec).into()
     }
 }
 
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-impl<T, C, A> From<allocator_api2::boxed::Box<[T], A>> for Vec<T, C>
-where
-    A: allocator_api2::alloc::Allocator,
-    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
-{
+#[cfg(all(feature = "alloc", feature = "nightly"))]
+impl<T, A: crate::alloc::Allocator> From<alloc_crate::boxed::Box<[T], A>> for Vec<T, A> {
     #[inline]
-    fn from(vec: allocator_api2::boxed::Box<[T], A>) -> Self {
-        allocator_api2::vec::Vec::<T, A>::from(vec).into()
+    fn from(vec: alloc_crate::boxed::Box<[T], A>) -> Self {
+        alloc_crate::vec::Vec::<T, A>::from(vec).into()
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<T, C> From<Vec<T, C>> for alloc::boxed::Box<[T]>
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T> ConvertAlloc<alloc_crate::vec::Vec<T>> for Vec<T, Global> {
+    fn convert(self) -> alloc_crate::vec::Vec<T> {
+        let (raw, len, cap) = self.into_raw_parts();
+        unsafe { alloc_crate::vec::Vec::from_raw_parts(raw, len, cap) }
+    }
+}
+
+#[cfg(all(feature = "alloc", feature = "nightly"))]
+impl<T, C: VecConfigAlloc<T>> ConvertAlloc<alloc_crate::vec::Vec<T, C::Alloc>> for Vec<T, Global> {
+    fn convert(self) -> alloc_crate::vec::Vec<T, C::Alloc> {
+        let (raw, len, cap, alloc) = self.into_raw_parts_with_alloc();
+        unsafe { alloc_crate::vec::Vec::from_raw_parts_in(raw, len, cap, alloc) }
+    }
+}
+
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T> ConvertAlloc<Vec<T, Global>> for alloc_crate::vec::Vec<T> {
+    fn convert(self) -> Vec<T, Global> {
+        let mut vec = ManuallyDrop::new(self);
+        unsafe { Vec::from_raw_parts(vec.as_mut_ptr(), vec.len(), vec.capacity()) }
+    }
+}
+
+#[cfg(all(feature = "alloc", feature = "nightly"))]
+impl<T, A: crate::alloc::Allocator> ConvertAlloc<Vec<T, A>> for alloc_crate::vec::Vec<T, A> {
+    fn convert(self) -> Vec<T, A> {
+        let mut vec = ManuallyDrop::new(self);
+        unsafe {
+            Vec::from_raw_parts_in(
+                vec.as_mut_ptr(),
+                vec.len(),
+                vec.capacity(),
+                ptr::read(&vec.allocator()),
+            )
+        }
+    }
+}
+
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T, C> From<Vec<T, C>> for alloc_crate::boxed::Box<[T]>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
 {
     #[inline]
     fn from(vec: Vec<T, C>) -> Self {
-        alloc::vec::Vec::<T>::from(vec).into_boxed_slice()
+        alloc_crate::vec::Vec::<T>::from(vec).into_boxed_slice()
     }
 }
 
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-impl<T, C, A> From<Vec<T, C>> for allocator_api2::boxed::Box<[T], A>
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T, C> From<alloc_crate::vec::Vec<T>> for Vec<T, C>
 where
-    A: allocator_api2::alloc::Allocator,
-    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
 {
-    #[inline]
-    fn from(vec: Vec<T, C>) -> Self {
-        allocator_api2::vec::Vec::<T, A>::from(vec).into_boxed_slice()
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<T, C> From<alloc::vec::Vec<T>> for Vec<T, C>
-where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
-{
-    fn from(vec: alloc::vec::Vec<T>) -> Self {
+    fn from(vec: alloc_crate::vec::Vec<T>) -> Self {
         let capacity = vec.capacity();
         let length = vec.len();
         let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
@@ -1607,64 +1697,37 @@ where
     }
 }
 
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-impl<T, C, A> From<allocator_api2::vec::Vec<T, A>> for Vec<T, C>
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T, C> From<Vec<T, C>> for alloc_crate::vec::Vec<T>
 where
-    A: allocator_api2::alloc::Allocator,
-    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
-{
-    #[inline]
-    fn from(vec: allocator_api2::vec::Vec<T, A>) -> Self {
-        let (data, length, capacity, alloc) = vec.into_raw_parts_with_alloc();
-        unsafe { Self::from_parts(NonNull::new_unchecked(data), length, capacity, alloc) }
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<T, C> From<Vec<T, C>> for alloc::vec::Vec<T>
-where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
 {
     fn from(vec: Vec<T, C>) -> Self {
         let mut buffer = ManuallyDrop::new(vec.into_inner());
         let capacity = buffer.capacity();
         let length = buffer.length();
         let data = buffer.data_ptr_mut();
-        unsafe { alloc::vec::Vec::from_raw_parts(data, length, capacity) }
-    }
-}
-
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-impl<T, C, A> From<Vec<T, C>> for allocator_api2::vec::Vec<T, A>
-where
-    A: allocator_api2::alloc::Allocator,
-    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
-{
-    fn from(vec: Vec<T, C>) -> Self {
-        let (data, length, capacity, alloc) = C::vec_buffer_into_parts(vec.into_inner());
-        unsafe {
-            allocator_api2::vec::Vec::from_raw_parts_in(data.as_ptr(), length, capacity, alloc)
-        }
+        unsafe { alloc_crate::vec::Vec::from_raw_parts(data, length, capacity) }
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<'b, T: Clone, C> From<alloc::borrow::Cow<'b, [T]>> for Vec<T, C>
+impl<'b, T: Clone, C> From<alloc_crate::borrow::Cow<'b, [T]>> for Vec<T, C>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
 {
-    fn from(cow: alloc::borrow::Cow<'b, [T]>) -> Self {
+    fn from(cow: alloc_crate::borrow::Cow<'b, [T]>) -> Self {
         cow.into_owned().into()
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<'b, T: Clone, C> From<Vec<T, C>> for alloc::borrow::Cow<'b, [T]>
+impl<'b, T: Clone, C> From<Vec<T, C>> for alloc_crate::borrow::Cow<'b, [T]>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
 {
-    fn from(vec: Vec<T, C>) -> alloc::borrow::Cow<'b, [T]> {
-        alloc::borrow::Cow::Owned(vec.into())
+    fn from(vec: Vec<T, C>) -> alloc_crate::borrow::Cow<'b, [T]> {
+        alloc_crate::borrow::Cow::Owned(vec.into())
     }
 }
 
@@ -1711,39 +1774,39 @@ impl<C: VecConfigNew<u8>> From<&str> for Vec<u8, C> {
 }
 
 #[cfg(feature = "alloc")]
-impl<C> From<alloc::string::String> for Vec<u8, C>
+impl<C> From<alloc_crate::string::String> for Vec<u8, C>
 where
-    C: VecConfigAllocParts<u8, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<u8, Alloc = Global, Index = usize>,
 {
     #[inline]
-    fn from(string: alloc::string::String) -> Self {
+    fn from(string: alloc_crate::string::String) -> Self {
         string.into_bytes().into()
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<C: VecConfigNew<u8>> From<&alloc::string::String> for Vec<u8, C> {
+impl<C: VecConfigNew<u8>> From<&alloc_crate::string::String> for Vec<u8, C> {
     #[inline]
-    fn from(string: &alloc::string::String) -> Self {
+    fn from(string: &alloc_crate::string::String) -> Self {
         string.as_bytes().into()
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<C> From<alloc::ffi::CString> for Vec<u8, C>
+impl<C> From<alloc_crate::ffi::CString> for Vec<u8, C>
 where
-    C: VecConfigAllocParts<u8, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<u8, Alloc = Global, Index = usize>,
 {
     #[inline]
-    fn from(string: alloc::ffi::CString) -> Self {
+    fn from(string: alloc_crate::ffi::CString) -> Self {
         string.into_bytes().into()
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<C: VecConfigNew<u8>> From<&alloc::ffi::CString> for Vec<u8, C> {
+impl<C: VecConfigNew<u8>> From<&alloc_crate::ffi::CString> for Vec<u8, C> {
     #[inline]
-    fn from(string: &alloc::ffi::CString) -> Self {
+    fn from(string: &alloc_crate::ffi::CString) -> Self {
         string.as_bytes().into()
     }
 }
@@ -1902,44 +1965,20 @@ where
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<A, B, C> PartialEq<alloc::vec::Vec<A>> for Vec<B, C>
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<A, B, C> PartialEq<alloc_crate::vec::Vec<A>> for Vec<B, C>
 where
     B: PartialEq<A>,
     C: VecConfig,
 {
     #[inline]
-    fn eq(&self, other: &alloc::vec::Vec<A>) -> bool {
+    fn eq(&self, other: &alloc_crate::vec::Vec<A>) -> bool {
         other.eq(self)
     }
 }
 
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-impl<A, B, C> PartialEq<allocator_api2::vec::Vec<A>> for Vec<B, C>
-where
-    B: PartialEq<A>,
-    C: VecConfig,
-{
-    #[inline]
-    fn eq(&self, other: &allocator_api2::vec::Vec<A>) -> bool {
-        other.eq(self)
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<A, B, C> PartialEq<Vec<B, C>> for alloc::vec::Vec<A>
-where
-    B: PartialEq<A>,
-    C: VecConfig,
-{
-    #[inline]
-    fn eq(&self, other: &Vec<B, C>) -> bool {
-        other.eq(self)
-    }
-}
-
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-impl<A, B, C> PartialEq<Vec<B, C>> for allocator_api2::vec::Vec<A>
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<A, B, C> PartialEq<Vec<B, C>> for alloc_crate::vec::Vec<A>
 where
     B: PartialEq<A>,
     C: VecConfig,
@@ -1953,7 +1992,6 @@ where
 impl<T, C: VecConfig, const N: usize> TryFrom<Vec<T, C>> for [T; N] {
     type Error = Vec<T, C>;
 
-    #[inline]
     fn try_from(mut vec: Vec<T, C>) -> Result<Self, Self::Error> {
         if vec.len().to_usize() != N {
             return Err(vec);
@@ -1966,14 +2004,13 @@ impl<T, C: VecConfig, const N: usize> TryFrom<Vec<T, C>> for [T; N] {
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<T, C, const N: usize> TryFrom<Vec<T, C>> for alloc::boxed::Box<[T; N]>
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T, C, const N: usize> TryFrom<Vec<T, C>> for alloc_crate::boxed::Box<[T; N]>
 where
-    C: VecConfigAllocParts<T, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
 {
     type Error = Vec<T, C>;
 
-    #[inline]
     fn try_from(vec: Vec<T, C>) -> Result<Self, Self::Error> {
         if vec.len().to_usize() != N {
             return Err(vec);
@@ -1981,27 +2018,7 @@ where
 
         let (data, length, capacity, _alloc) = vec.into_parts();
         assert_eq!(capacity, length);
-        Ok(unsafe { alloc::boxed::Box::from_raw(data.as_ptr().cast()) })
-    }
-}
-
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-impl<T, C, A, const N: usize> TryFrom<Vec<T, C>> for allocator_api2::boxed::Box<[T; N], A>
-where
-    C: VecConfigAllocParts<T, Alloc = A, Index = usize>,
-    A: allocator_api2::alloc::Allocator,
-{
-    type Error = Vec<T, C>;
-
-    #[inline]
-    fn try_from(vec: Vec<T, C>) -> Result<Self, Self::Error> {
-        if vec.len().to_usize() != N {
-            return Err(vec);
-        }
-
-        let (data, length, capacity, alloc) = vec.into_parts();
-        assert_eq!(capacity, length);
-        Ok(unsafe { allocator_api2::boxed::Box::from_raw_in(data.as_ptr().cast(), alloc) })
+        Ok(unsafe { alloc_crate::boxed::Box::from_raw(data.as_ptr().cast()) })
     }
 }
 
@@ -2032,23 +2049,15 @@ impl<C: VecConfig> std::io::Write for Vec<u8, C> {
 }
 
 #[cfg(feature = "zeroize")]
-impl<T, C: crate::storage::RawAlloc> zeroize::Zeroize
-    for Vec<T, crate::storage::ZeroizingAlloc<C>>
-{
-    #[inline]
+impl<T, A: VecConfig> Zeroize for Vec<T, A> {
     fn zeroize(&mut self) {
-        self.shrink_to(0);
+        self.clear();
+        self.spare_capacity_mut().zeroize();
     }
 }
 
 #[cfg(feature = "zeroize")]
-impl<T, C: crate::storage::RawAlloc> zeroize::ZeroizeOnDrop
-    for Vec<T, crate::storage::ZeroizingAlloc<C>>
-{
-}
-
-// TODO
-// into_flattened
+impl<T, C: VecConfig> ZeroizeOnDrop for Vec<T, C> where C::Buffer<T>: ZeroizeOnDrop {}
 
 /// ```compile_fail,E0597
 /// use flex_alloc::{storage::byte_storage, vec::Vec};

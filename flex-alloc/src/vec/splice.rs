@@ -127,7 +127,7 @@ where
                     B::Index::try_from_usize(buf_cap.to_usize() + min_remain - cap_remain)
                         .expect("exceeded range of capacity");
                 let new_cap = G::next_capacity::<B::Item, _>(buf_cap, new_cap);
-                match self.drain.buf.vec_try_resize(new_cap, false) {
+                match self.drain.buf.grow_buffer(new_cap, false) {
                     Ok(_) => (),
                     Err(err) => err.panic(),
                 }

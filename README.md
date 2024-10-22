@@ -2,11 +2,9 @@
 
 This crate provides highly flexible container types (currently `Cow`, and `Vec`) which mimic the API provided in `std`, with allocator flexibility going beyond what is supported by unstable features such as `allocator-api`.
 
-Both `no-std` as well as `no-alloc` environments are supported.
+Both `no-std` and `no-alloc` environments are supported.
 
 ## Highlights
-
-This crate currently implements a [`Vec`-compatible container](vec::Vec) with additional features:
 
 - Optional `alloc` support, such that application may easily alternate between fixed buffer sizes and heap allocation.
 - Support for custom allocators, including the ability to spill from a small stack allocation to a heap allocation.

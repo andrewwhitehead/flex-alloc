@@ -8,21 +8,21 @@ use core::{
 
 use const_default::ConstDefault;
 
+use crate::alloc::{AllocateIn, Allocator};
 use crate::error::StorageError;
-use crate::storage::{RawAlloc, RawAllocIn};
 
 /// The owned type for a collection which may be owned or borrowed.
 pub type Owned<B, A> = <B as ToOwnedIn<A>>::Owned;
 
 /// Support conversion from borrowed types to owned ones associated with an allocator.
-pub trait ToOwnedIn<A: RawAlloc> {
+pub trait ToOwnedIn<A: Allocator> {
     /// The owned representation of this type.
     type Owned: Borrow<Self>;
 
     /// Create an owned copy of this instance in a given allocation target.
     fn to_owned_in<I>(&self, alloc_in: I) -> Self::Owned
     where
-        I: RawAllocIn<RawAlloc = A>,
+        I: AllocateIn<Alloc = A>,
     {
         match self.try_to_owned_in(alloc_in) {
             Ok(inst) => inst,
@@ -33,22 +33,22 @@ pub trait ToOwnedIn<A: RawAlloc> {
     /// To to create an owned copy of this instance in a given allocation target.
     fn try_to_owned_in<I>(&self, alloc_in: I) -> Result<Self::Owned, StorageError>
     where
-        I: RawAllocIn<RawAlloc = A>;
+        I: AllocateIn<Alloc = A>;
 }
 
-impl<T: Clone + 'static, A: RawAlloc> ToOwnedIn<A> for T {
+impl<T: Clone + 'static, A: Allocator> ToOwnedIn<A> for T {
     type Owned = T;
 
     fn try_to_owned_in<I>(&self, _alloc_in: I) -> Result<Self::Owned, StorageError>
     where
-        I: RawAllocIn<RawAlloc = A>,
+        I: AllocateIn<Alloc = A>,
     {
         Ok(self.clone())
     }
 }
 
 /// Representation of either an owned or borrowed instance of a type.
-pub enum Cow<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> {
+pub enum Cow<'b, T: ToOwnedIn<A> + ?Sized, A: Allocator> {
     /// The borrowed variant, limited by a lifetime.
     Borrowed(&'b T),
 
@@ -56,7 +56,7 @@ pub enum Cow<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> {
     Owned(Owned<T, A>),
 }
 
-impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
+impl<'b, T: ToOwnedIn<A> + ?Sized, A: Allocator> Cow<'b, T, A> {
     /// Determine if this instance is borrowed.
     #[inline]
     pub fn is_borrowed(&self) -> bool {
@@ -74,7 +74,7 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     #[inline]
     pub fn to_mut(&mut self) -> &mut Owned<T, A>
     where
-        A: Default + RawAlloc,
+        A: Default + Allocator,
     {
         self.to_mut_in(A::default())
     }
@@ -83,7 +83,7 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     /// Return a mutable reference to the owned instance.
     pub fn to_mut_in<I>(&mut self, alloc_in: I) -> &mut Owned<T, A>
     where
-        I: RawAllocIn<RawAlloc = A>,
+        I: AllocateIn<Alloc = A>,
     {
         match *self {
             Self::Borrowed(borrowed) => {
@@ -101,7 +101,7 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     /// owned instance.
     pub fn into_owned(self) -> Owned<T, A>
     where
-        A: Default + RawAlloc,
+        A: Default + Allocator,
     {
         match self {
             Self::Borrowed(borrowed) => borrowed.to_owned_in(A::default()),
@@ -113,7 +113,7 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     /// Unwrap and return the owned instance.
     pub fn into_owned_in<I>(self, alloc_in: I) -> Owned<T, A>
     where
-        I: RawAllocIn<RawAlloc = A>,
+        I: AllocateIn<Alloc = A>,
     {
         match self {
             Self::Borrowed(borrowed) => borrowed.to_owned_in(alloc_in),
@@ -125,7 +125,7 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     /// Unwrap and return the owned instance or a storage error.
     pub fn try_into_owned(self) -> Result<Owned<T, A>, StorageError>
     where
-        A: Default + RawAlloc,
+        A: Default + Allocator,
     {
         match self {
             Self::Borrowed(borrowed) => borrowed.try_to_owned_in(A::default()),
@@ -137,7 +137,7 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     /// target. Unwrap and return the owned instance or a storage error.
     pub fn try_into_owned_in<I>(self, storage: I) -> Result<Owned<T, A>, StorageError>
     where
-        I: RawAllocIn<RawAlloc = A>,
+        I: AllocateIn<Alloc = A>,
     {
         match self {
             Self::Borrowed(borrowed) => borrowed.try_to_owned_in(storage),
@@ -146,19 +146,19 @@ impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Cow<'b, T, A> {
     }
 }
 
-impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> AsRef<T> for Cow<'_, T, A> {
+impl<T: ToOwnedIn<A> + ?Sized, A: Allocator> AsRef<T> for Cow<'_, T, A> {
     fn as_ref(&self) -> &T {
         self
     }
 }
 
-impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Borrow<T> for Cow<'_, T, A> {
+impl<T: ToOwnedIn<A> + ?Sized, A: Allocator> Borrow<T> for Cow<'_, T, A> {
     fn borrow(&self) -> &T {
         self
     }
 }
 
-impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Clone for Cow<'_, T, A>
+impl<T: ToOwnedIn<A> + ?Sized, A: Allocator> Clone for Cow<'_, T, A>
 where
     Owned<T, A>: Clone,
 {
@@ -177,7 +177,7 @@ where
     }
 }
 
-impl<T, A: RawAlloc> ConstDefault for Cow<'_, T, A>
+impl<T, A: Allocator> ConstDefault for Cow<'_, T, A>
 where
     T: ToOwnedIn<A> + ?Sized,
     T::Owned: ConstDefault,
@@ -185,7 +185,7 @@ where
     const DEFAULT: Self = Self::Owned(T::Owned::DEFAULT);
 }
 
-impl<T, A: RawAlloc> Debug for Cow<'_, T, A>
+impl<T, A: Allocator> Debug for Cow<'_, T, A>
 where
     T: ToOwnedIn<A> + Debug + ?Sized,
     Owned<T, A>: Debug,
@@ -198,7 +198,7 @@ where
     }
 }
 
-impl<T, A: RawAlloc> Display for Cow<'_, T, A>
+impl<T, A: Allocator> Display for Cow<'_, T, A>
 where
     T: ToOwnedIn<A> + Display + ?Sized,
     Owned<T, A>: Display,
@@ -211,7 +211,7 @@ where
     }
 }
 
-impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Deref for Cow<'_, T, A> {
+impl<T: ToOwnedIn<A> + ?Sized, A: Allocator> Deref for Cow<'_, T, A> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -222,7 +222,7 @@ impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Deref for Cow<'_, T, A> {
     }
 }
 
-impl<T: ToOwnedIn<A> + ?Sized, A: RawAlloc> Default for Cow<'_, T, A>
+impl<T: ToOwnedIn<A> + ?Sized, A: Allocator> Default for Cow<'_, T, A>
 where
     Owned<T, A>: Default,
 {
@@ -232,21 +232,21 @@ where
     }
 }
 
-impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> From<&'b T> for Cow<'b, T, A> {
+impl<'b, T: ToOwnedIn<A> + ?Sized, A: Allocator> From<&'b T> for Cow<'b, T, A> {
     #[inline]
     fn from(borrow: &'b T) -> Self {
         Self::Borrowed(borrow)
     }
 }
 
-impl<'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc> From<&'b mut T> for Cow<'b, T, A> {
+impl<'b, T: ToOwnedIn<A> + ?Sized, A: Allocator> From<&'b mut T> for Cow<'b, T, A> {
     #[inline]
     fn from(borrow: &'b mut T) -> Self {
         Self::Borrowed(borrow)
     }
 }
 
-impl<'a, 'b, T: ToOwnedIn<A> + ?Sized, A: RawAlloc, U: ToOwnedIn<B> + ?Sized, B: RawAlloc>
+impl<'a, 'b, T: ToOwnedIn<A> + ?Sized, A: Allocator, U: ToOwnedIn<B> + ?Sized, B: Allocator>
     PartialEq<Cow<'b, U, B>> for Cow<'a, T, A>
 where
     T: PartialEq<U>,
@@ -257,4 +257,4 @@ where
     }
 }
 
-impl<'a, T: ToOwnedIn<A> + Eq + ?Sized, A: RawAlloc> Eq for Cow<'a, T, A> {}
+impl<'a, T: ToOwnedIn<A> + Eq + ?Sized, A: Allocator> Eq for Cow<'a, T, A> {}

@@ -5,11 +5,6 @@ use core::ptr::NonNull;
 use crate::error::StorageError;
 
 #[inline]
-pub fn array_layout<T>(count: usize) -> Result<Layout, StorageError> {
-    Layout::array::<T>(count).map_err(StorageError::LayoutError)
-}
-
-#[inline]
 pub fn layout_aligned_bytes(
     buf: &mut [MaybeUninit<u8>],
     layout: Layout,

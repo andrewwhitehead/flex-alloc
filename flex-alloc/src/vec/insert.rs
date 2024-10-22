@@ -25,6 +25,16 @@ impl<'a, T> Inserter<'a, T> {
     }
 
     #[inline]
+    pub fn for_uninit_slice(buf: &'a mut [MaybeUninit<T>]) -> Self {
+        Self {
+            buf,
+            start: 0,
+            end: 0,
+            tail: 0,
+        }
+    }
+
+    #[inline]
     pub fn for_buffer<B>(buf: &'a mut B) -> Self
     where
         B: VecBuffer<Item = T>,

@@ -6,8 +6,9 @@ use core::mem::size_of;
 use criterion::{black_box, Criterion};
 
 use flex_alloc::{
-    storage::{aligned_byte_storage, array_storage, Inline, Thin, WithAlloc},
-    vec::Vec as FlexVec,
+    alloc::WithAlloc,
+    storage::{aligned_byte_storage, array_storage, Inline},
+    vec::{config::Thin, Vec as FlexVec},
 };
 
 fn standard_compare(c: &mut Criterion) {

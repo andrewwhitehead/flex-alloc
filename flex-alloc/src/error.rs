@@ -3,6 +3,8 @@
 use core::alloc::LayoutError;
 use core::fmt;
 
+use crate::alloc::AllocError;
+
 /// An enumeration of error types raised by storage implementations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
@@ -12,6 +14,8 @@ pub enum StorageError {
     CapacityLimit,
     /// The provided layout was not allocatable.
     LayoutError(LayoutError),
+    /// Memory protection failed.
+    ProtectionError,
     /// The requested operation is not supported for this storage.
     Unsupported,
 }
@@ -23,6 +27,7 @@ impl StorageError {
             Self::AllocError => "Allocation error",
             Self::CapacityLimit => "Exceeded storage capacity limit",
             Self::LayoutError(_) => "Layout error",
+            Self::ProtectionError => "Memory protection failed",
             Self::Unsupported => "Unsupported",
         }
     }
@@ -38,6 +43,12 @@ impl StorageError {
 impl fmt::Display for StorageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl From<AllocError> for StorageError {
+    fn from(_err: AllocError) -> Self {
+        Self::AllocError
     }
 }
 

@@ -1,4 +1,5 @@
 #![cfg(all(feature = "alloc", feature = "zeroize"))]
+#![cfg_attr(feature = "nightly", feature(allocator_api))]
 
 use core::alloc::Layout;
 use core::cell::RefCell;
@@ -6,18 +7,19 @@ use core::ptr::NonNull;
 use core::slice;
 
 use flex_alloc::{
-    storage::{array_storage, byte_storage, Global, RawAlloc, WithAlloc, ZeroizingAlloc},
+    alloc::{Allocator, Global, WithAlloc, ZeroizingAlloc},
+    storage::{array_storage, byte_storage},
     vec,
     vec::{Vec as FlexVec, ZeroizingVec},
 };
 
 #[derive(Debug)]
-struct TestAlloc<A: RawAlloc> {
+struct TestAlloc<A: Allocator> {
     alloc: A,
     released: RefCell<Vec<Vec<u8>>>,
 }
 
-impl<A: RawAlloc> TestAlloc<A> {
+impl<A: Allocator> TestAlloc<A> {
     fn new(alloc: A) -> Self {
         Self {
             alloc,
@@ -26,24 +28,49 @@ impl<A: RawAlloc> TestAlloc<A> {
     }
 }
 
-impl<A: RawAlloc> RawAlloc for &TestAlloc<A> {
-    fn try_alloc(&self, layout: Layout) -> Result<NonNull<[u8]>, flex_alloc::StorageError> {
-        self.alloc.try_alloc(layout)
+unsafe impl<A: Allocator> Allocator for &TestAlloc<A> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, flex_alloc::alloc::AllocError> {
+        self.alloc.allocate(layout)
     }
 
-    unsafe fn try_resize(
+    fn allocate_zeroed(
+        &self,
+        layout: Layout,
+    ) -> Result<NonNull<[u8]>, flex_alloc::alloc::AllocError> {
+        self.alloc.allocate_zeroed(layout)
+    }
+
+    unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
         old_layout: Layout,
         new_layout: Layout,
-    ) -> Result<NonNull<[u8]>, flex_alloc::StorageError> {
-        self.alloc.try_resize(ptr, old_layout, new_layout)
+    ) -> Result<NonNull<[u8]>, flex_alloc::alloc::AllocError> {
+        self.alloc.grow(ptr, old_layout, new_layout)
     }
 
-    unsafe fn release(&self, ptr: NonNull<u8>, layout: Layout) {
+    unsafe fn grow_zeroed(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, flex_alloc::alloc::AllocError> {
+        self.alloc.grow_zeroed(ptr, old_layout, new_layout)
+    }
+
+    unsafe fn shrink(
+        &self,
+        ptr: NonNull<u8>,
+        old_layout: Layout,
+        new_layout: Layout,
+    ) -> Result<NonNull<[u8]>, flex_alloc::alloc::AllocError> {
+        self.alloc.shrink(ptr, old_layout, new_layout)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         let cp = Vec::from(unsafe { slice::from_raw_parts(ptr.as_ptr(), layout.size()) });
         self.released.borrow_mut().push(cp);
-        self.alloc.release(ptr, layout)
+        self.alloc.deallocate(ptr, layout)
     }
 }
 

@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "nightly", feature(allocator_api))]
+
 use core::marker::PhantomData as Cfg;
 use core::mem::ManuallyDrop;
 #[cfg(feature = "alloc")]
@@ -18,9 +20,12 @@ use flex_alloc::{
 
 #[cfg(feature = "alloc")]
 use flex_alloc::{
-    storage::{Global, Thin, WithAlloc},
+    alloc::{Global, WithAlloc},
     vec,
-    vec::{config::Custom, ThinVec},
+    vec::{
+        config::{Custom, Thin},
+        ThinVec,
+    },
 };
 
 const SLICE: &[usize] = &[1, 2, 3, 4, 5];
@@ -51,8 +56,8 @@ fn vec_new_as_slice<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 
 #[rstest]
 #[cfg_attr(feature = "alloc", case::global(Global))]
-#[cfg_attr(feature = "alloc", case::thin(Thin))]
-#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::default()))]
+#[cfg_attr(feature = "alloc", case::thin(Thin::<Global>::DEFAULT))]
+#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::DEFAULT))]
 #[case::array(&mut array_storage::<_, 10>())]
 #[case::aligned(&mut aligned_byte_storage::<usize, 1000>())]
 #[case::bytes(&mut byte_storage::<1000>())]
@@ -77,8 +82,8 @@ fn vec_with_capacity_push<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 
 #[rstest]
 #[cfg_attr(feature = "alloc", case::global(Global))]
-#[cfg_attr(feature = "alloc", case::thin(Thin))]
-#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::default()))]
+#[cfg_attr(feature = "alloc", case::thin(Thin::<Global>::DEFAULT))]
+#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::DEFAULT))]
 #[case::array(&mut array_storage::<_, 10>())]
 #[case::aligned(&mut aligned_byte_storage::<usize, 1000>())]
 #[case::bytes(&mut byte_storage::<1000>())]
@@ -178,8 +183,8 @@ fn vec_extend_new<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 
 #[rstest]
 #[cfg_attr(feature = "alloc", case::global(Global))]
-#[cfg_attr(feature = "alloc", case::thin(Thin))]
-#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::default()))]
+#[cfg_attr(feature = "alloc", case::thin(Thin::<Global>::DEFAULT))]
+#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::DEFAULT))]
 #[case::array(&mut array_storage::<_, 10>())]
 #[case::aligned(&mut aligned_byte_storage::<usize, 1000>())]
 #[case::bytes(&mut byte_storage::<1000>())]
@@ -207,8 +212,8 @@ fn vec_extend_from_slice_new<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 
 #[rstest]
 #[cfg_attr(feature = "alloc", case::global(Global))]
-#[cfg_attr(feature = "alloc", case::thin(Thin))]
-#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::default()))]
+#[cfg_attr(feature = "alloc", case::thin(Thin::<Global>::DEFAULT))]
+#[cfg_attr(feature="alloc", case::custom(Custom::<Global, u8>::DEFAULT))]
 #[case::array(&mut array_storage::<_, 10>())]
 #[case::aligned(&mut aligned_byte_storage::<usize, 1000>())]
 #[case::bytes(&mut byte_storage::<1000>())]
@@ -409,10 +414,12 @@ fn vec_check_grow_double() {
 }
 
 #[cfg(feature = "alloc")]
-#[test]
+#[rstest]
+#[case::global(Cfg::<Global>)]
 #[cfg_attr(miri, ignore)]
-fn vec_extend_large_global() {
-    let mut b = FlexVec::<usize>::new();
+fn vec_extend_large<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
+    // initial capacity forces a resize
+    let mut b = FlexVec::<usize, C>::with_capacity(C::Index::from_usize(10));
     let count = 1000000;
     b.extend(0..count);
     for i in 0..count {
@@ -463,15 +470,6 @@ fn vec_zst() {
     assert_eq!(iter.next(), None);
 }
 
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-#[test]
-fn vec_into_allocator_api2_vec() {
-    let mut b = FlexVec::<usize>::with_capacity(10);
-    b.insert_slice(0, &[1, 2, 3, 4]);
-    let vec = allocator_api2::vec::Vec::<usize>::from(b);
-    assert_eq!(vec, &[1, 2, 3, 4]);
-}
-
 #[cfg(feature = "alloc")]
 #[test]
 fn vec_into_std_vec() {
@@ -494,24 +492,15 @@ fn vec_into_boxed_slice() {
     assert_eq!(&*boxed, SLICE);
 }
 
-#[cfg(all(feature = "alloc", feature = "allocator-api2"))]
-#[test]
-fn vec_into_allocator_api2_boxed_slice() {
-    let vec = FlexVec::<_>::from_slice(SLICE);
-    let boxed: allocator_api2::boxed::Box<_> = vec.into();
-    assert_eq!(&*boxed, SLICE);
-    let vec = FlexVec::<_>::from(boxed);
-    assert_eq!(&vec, SLICE);
-    assert_eq!(vec.capacity(), SLICE.len());
-}
-
 #[cfg(feature = "alloc")]
 #[test]
 fn vec_into_std_boxed_slice() {
+    use flex_alloc::alloc::ConvertAlloc;
+
     let vec = FlexVec::<_>::from_slice(SLICE);
-    let boxed: std::boxed::Box<_> = vec.into();
+    let boxed: std::boxed::Box<_> = vec.into_boxed_slice().convert();
     assert_eq!(&*boxed, SLICE);
-    let vec = FlexVec::<_>::from(boxed);
+    let vec: FlexVec<_> = boxed.convert().into_vec();
     assert_eq!(&vec, SLICE);
     assert_eq!(vec.capacity(), SLICE.len());
 }
@@ -646,15 +635,6 @@ fn vec_custom_index_capacity() {
     let mut v = FlexVec::new_in(Custom::<Global, u8>::DEFAULT);
     v.resize(255, 1);
     assert!(v.try_push(1).is_err());
-}
-
-#[cfg(feature = "alloc")]
-#[test]
-fn vec_custom_index_thin_new() {
-    let mut v = FlexVec::<usize, Custom<Thin, u8>>::new();
-    v.resize(255, 1);
-    assert!(v.try_push(1).is_err());
-    assert!(size_of_val(&v) == size_of::<*const ()>());
 }
 
 #[cfg(feature = "alloc")]
