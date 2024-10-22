@@ -1,7 +1,7 @@
 use core::alloc::{Layout, LayoutError};
 use core::fmt;
 use core::marker::PhantomData;
-use core::mem::ManuallyDrop;
+use core::mem::{align_of, ManuallyDrop};
 use core::ptr;
 use core::ptr::NonNull;
 

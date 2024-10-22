@@ -2,7 +2,7 @@
 
 use core::alloc::Layout;
 use core::any::type_name;
-use core::mem::{ManuallyDrop, MaybeUninit};
+use core::mem::{size_of, ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::{fmt, ptr};
