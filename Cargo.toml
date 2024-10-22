@@ -1,3 +1,3 @@
 [workspace]
-members = ["flex-alloc", "examples/bumpalo"]
+members = ["flex-alloc", "flex-alloc-secure", "examples/bumpalo"]
 resolver = "2"

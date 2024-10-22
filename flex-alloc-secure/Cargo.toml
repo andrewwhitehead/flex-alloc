@@ -1,0 +1,24 @@
+[package]
+name = "flex-alloc-secure"
+version = "0.0.1"
+authors = ["Andrew Whitehead <cywolf@gmail.com>"]
+edition = "2021"
+description = "Secured allocations for flex-alloc"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/andrewwhitehead/flex-alloc/"
+categories = ["data-structures", "memory-management", "no-std"]
+keywords = ["secure", "vec", "zeroize"]
+rust-version = "1.74"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.158"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = "0.59"
+
+[dependencies]
+const-default = "1"
+flex-alloc = { path = "../flex-alloc", features = ["alloc", "zeroize"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+zeroize = "1"
