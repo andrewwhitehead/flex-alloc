@@ -1,6 +1,6 @@
 use core::any::type_name;
 use core::fmt;
-use core::mem::MaybeUninit;
+use core::mem::{size_of, size_of_val, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::ptr;
 use core::slice;
