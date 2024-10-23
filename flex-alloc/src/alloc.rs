@@ -22,7 +22,9 @@ pub use allocator_api2::alloc::{AllocError, Allocator};
 #[cfg(feature = "zeroize")]
 use zeroize::Zeroize;
 
-/// An error resulting from a failed memory allocation.
+/// The AllocError error indicates an allocation failure that may be due to
+/// resource exhaustion or to something wrong when combining the given input
+/// arguments with this allocator.
 #[cfg(not(feature = "allocator-api2"))]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct AllocError;
@@ -37,6 +39,44 @@ impl fmt::Display for AllocError {
 #[cfg(all(feature = "std", not(feature = "allocator-api2")))]
 impl std::error::Error for AllocError {}
 
+/// An implementation of Allocator can allocate, grow, shrink, and deallocate
+/// arbitrary blocks of data described via `Layout`.
+///
+/// Allocator is designed to be implemented on ZSTs, references, or smart
+/// pointers because having an allocator like `MyAlloc([u8; N])` cannot be
+/// moved, without updating the pointers to the allocated memory.
+///
+/// Unlike `GlobalAlloc`, zero-sized allocations are allowed in `Allocator`.
+/// If an underlying allocator does not support this (like `jemalloc`) or
+/// return a null pointer (such as `libc::malloc`), this must be caught by
+/// the implementation.
+///
+/// # Currently allocated memory
+/// Some of the methods require that a memory block be currently allocated via
+/// an allocator. This means that:
+/// - The starting address for that memory block was previously returned by
+///   `allocate`, `grow`, or `shrink`, and
+/// - The memory block has not been subsequently deallocated, where blocks are
+///   either deallocated directly by being passed to deallocate or were change
+///   by being passed to `grow` or `shrink` that returns `Ok`. If `grow` or
+///   `shrink` have returned `Err`, the passed pointer remains valid.
+///
+/// # Memory fitting
+/// Some of the methods require that a layout fit a memory block. What it means
+/// for a layout to "fit" a memory block means (or equivalently, for a memory
+/// block to "fit" a layout) is that the following conditions must hold:
+/// - The block must be allocated with the same alignment as `layout.align()`, and
+/// - The provided `layout.size()` must fall in the range `min..=max`, where:
+///   - `min` is the size of the layout most recently used to allocate the block, and
+///   - `max` is the latest actual size returned from `allocate`, `grow`, or `shrink`.
+///
+/// #Safety
+/// - Memory blocks returned from an allocator must point to valid memory and retain
+/// their validity until the instance and all of its clones are dropped,
+/// - Cloning or moving the allocator must not invalidate memory blocks returned from
+/// this allocator. A cloned allocator must behave like the same allocator, and
+/// - Any pointer to a memory block which is currently allocated may be passed to any
+/// other method of the allocator.
 #[cfg(not(feature = "allocator-api2"))]
 pub unsafe trait Allocator {
     /// Try to allocate a slice of memory within this allocator instance,
@@ -211,10 +251,13 @@ pub trait WithAlloc<'a>: Sized {
     fn with_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A>;
 }
 
-/// The standard heap allocator. When the `alloc` feature is not enabled,
-/// usage will result in a panic.
+/// The global memory allocator.
+///
+/// When the `alloc` feature is enabled, this type implements the `Allocator`
+/// trait by forwarding calls to the allocator registered with the
+/// `#[global_allocator]` attribute if there is one, or the `std` crate's default.
 #[cfg(any(not(feature = "alloc"), not(feature = "allocator-api2")))]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "alloc", derive(Default, Copy))]
 pub struct Global;
 
@@ -247,7 +290,8 @@ unsafe impl Allocator for Global {
 
 #[cfg(not(feature = "alloc"))]
 // Stub implementation to allow Global as the default allocator type
-// even when the `alloc` feature is not enabled.
+// even when the `alloc` feature is not enabled. Any usage as an allocator
+// will result in a panic.
 unsafe impl Allocator for Global {
     fn allocate(&self, _layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         unimplemented!();
