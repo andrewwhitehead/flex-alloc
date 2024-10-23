@@ -127,12 +127,14 @@ pub fn alloc_pages(len: usize) -> Result<NonNull<[u8]>, AllocError> {
 
     #[cfg(all(windows, not(miri)))]
     {
-        let addr = Memory::VirtualAlloc(
-            ptr::null_mut(),
-            alloc_len,
-            Memory::MEM_COMMIT | Memory::MEM_RESERVE,
-            Memory::PAGE_READWRITE,
-        );
+        let addr = unsafe {
+            Memory::VirtualAlloc(
+                ptr::null_mut(),
+                alloc_len,
+                Memory::MEM_COMMIT | Memory::MEM_RESERVE,
+                Memory::PAGE_READWRITE,
+            )
+        };
         let range = ptr::slice_from_raw_parts_mut(addr.cast(), alloc_len);
         NonNull::new(range).ok_or_else(|| AllocError)
     }
@@ -148,7 +150,7 @@ pub fn dealloc_pages(addr: *mut u8, len: usize) {
             std::alloc::dealloc(
                 addr,
                 Layout::from_size_align_unchecked(alloc_len, page_size),
-            );
+            )
         };
         return;
     }
@@ -162,7 +164,7 @@ pub fn dealloc_pages(addr: *mut u8, len: usize) {
     #[cfg(all(windows, not(miri)))]
     {
         let _ = len;
-        Memory::VirtualFree(addr.cast(), 0, Memory::MEM_RELEASE);
+        unsafe { Memory::VirtualFree(addr.cast(), 0, Memory::MEM_RELEASE) };
     }
 }
 
