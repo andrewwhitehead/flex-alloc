@@ -15,7 +15,10 @@ rust-version = "1.74"
 libc = "0.2.158"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = "0.59"
+windows-sys = { version = "0.59", features = [
+    "Win32_System_Memory",
+    "Win32_System_SystemInformation",
+] }
 
 [dependencies]
 const-default = "1"
