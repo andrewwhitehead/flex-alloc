@@ -64,7 +64,7 @@ pub trait WriteProtected: ReadProtected {
 }
 
 /// A wrapper around a [`SecureBox`] which provides limited access to the
-/// contained value, enforcing memory protections which not in active use.
+/// contained value, enforcing memory protections when not in active use.
 pub struct ProtectedBox<T: ?Sized> {
     inner: UnsafeCell<SecureBox<T>>,
     refs: AtomicUsize,
@@ -318,9 +318,18 @@ impl<T: ?Sized> Drop for ProtectedBoxMut<'_, T> {
 mod tests {
     use core::sync::atomic::Ordering;
 
-    use crate::vec::SecureVec;
+    use super::{Protect, ProtectedBox, ReadProtected};
+    use crate::{protect::WriteProtected, vec::SecureVec};
 
-    use super::{ProtectedBox, ReadProtected};
+    #[test]
+    fn protected_mut() {
+        let mut prot = ProtectedBox::<usize>::default();
+        assert_eq!(prot.read_protected().as_ref(), &0);
+        let mut write = prot.write_protected();
+        *write = 10;
+        drop(write);
+        assert_eq!(prot.read_protected().as_ref(), &10);
+    }
 
     #[test]
     fn protected_ref_count() {
@@ -336,10 +345,20 @@ mod tests {
     }
 
     #[test]
-    fn sec_vec() {
+    fn protected_vec() {
         let mut vec = SecureVec::new();
-        for _ in 0..100 {
-            vec.push(1usize);
-        }
+        vec.resize(100, 1usize);
+        let boxed = vec.protect();
+        assert_eq!(boxed.read_protected().len(), 100);
     }
+
+    // #[test]
+    // fn protected_check_protection_crash() {
+    //     use crate::boxed::SecureBox;
+    //     let boxed = SecureBox::<usize>::default();
+    //     let ptr = boxed.as_ptr();
+    //     let prot = boxed.protect();
+    //     // let read = prot.read_protected(); // would change protection mode
+    //     println!("inner: {}", unsafe { &*ptr });
+    // }
 }

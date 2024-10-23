@@ -29,10 +29,17 @@ impl<T: ?Sized, A: Allocator> RawBox<T, A> {
         &self.alloc
     }
 
-    /// Get a read pointer to the beginning of the data allocation. This may be a
+    /// Get a const pointer to the beginning of the data allocation. This may be a
     /// dangling pointer if `T` is zero sized or the current capacity is zero.
     #[inline]
-    pub fn as_ptr(&mut self) -> *mut T {
+    pub fn as_ptr(&self) -> *const T {
+        self.ptr.as_ptr()
+    }
+
+    /// Get a mutable pointer to the beginning of the data allocation. This may be a
+    /// dangling pointer if `T` is zero sized or the current capacity is zero.
+    #[inline]
+    pub fn as_mut_ptr(&self) -> *mut T {
         self.ptr.as_ptr()
     }
 
@@ -442,15 +449,15 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     /// Get a read pointer to the beginning of the data allocation. This may be a
     /// dangling pointer if `T` is zero sized or the current capacity is zero.
     #[inline]
-    pub fn as_ptr(&mut self) -> *const T {
-        self.handle.as_ptr() as *const T
+    pub fn as_ptr(&self) -> *const T {
+        self.handle.as_ptr()
     }
 
     /// Get a mutable pointer to the beginning of the data allocation. This may be a
     /// dangling pointer if `T` is zero sized or the current capacity is zero.
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut T {
-        self.handle.as_ptr()
+        self.handle.as_mut_ptr()
     }
 
     /// Constructs a box from a raw pointer and an allocator instance.
