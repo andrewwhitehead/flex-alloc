@@ -235,20 +235,20 @@ pub trait AllocatorZeroizes: Allocator {}
 /// Attach an allocator to a fixed allocation buffer. Once the initial
 /// buffer is exhausted, additional buffer(s) may be requested from the
 /// new allocator instance.
-pub trait WithAlloc<'a>: Sized {
+pub trait SpillAlloc<'a>: Sized {
     /// The concrete type of resulting allocation target.
     type NewIn<A: 'a>;
 
     /// Consume the allocator instance, returning a new allocator
     /// which spills into the Global allocator.
     #[inline]
-    fn with_alloc(self) -> Self::NewIn<Global> {
-        Self::with_alloc_in(self, Global)
+    fn spill_alloc(self) -> Self::NewIn<Global> {
+        Self::spill_alloc_in(self, Global)
     }
 
     /// Consume the allocator instance, returning a new allocator
     /// which spills into the provided allocator instance `alloc`.
-    fn with_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A>;
+    fn spill_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A>;
 }
 
 /// The global memory allocator.
@@ -309,9 +309,9 @@ impl AllocatorDefault for Global {
 
 /// An allocator backed by a fixed storage buffer.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct FixedAlloc<'a>(PhantomData<&'a mut ()>);
+pub struct Fixed<'a>(PhantomData<&'a mut ()>);
 
-unsafe impl Allocator for FixedAlloc<'_> {
+unsafe impl Allocator for Fixed<'_> {
     #[inline(always)]
     fn allocate(&self, _layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         Err(AllocError)
@@ -349,27 +349,27 @@ unsafe impl Allocator for FixedAlloc<'_> {
     unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 }
 
-impl<'a> AllocatorDefault for FixedAlloc<'a> {
+impl<'a> AllocatorDefault for Fixed<'a> {
     const DEFAULT: Self = Self(PhantomData);
 }
 
-impl Clone for FixedAlloc<'_> {
+impl Clone for Fixed<'_> {
     fn clone(&self) -> Self {
-        FixedAlloc::DEFAULT
+        Fixed::DEFAULT
     }
 }
 
 /// An allocator which may represent either a fixed allocation or a dynamic
 /// allocation with an allocator instance `A`.
 #[derive(Debug)]
-pub struct SpillAlloc<'a, A> {
+pub struct Spill<'a, A> {
     alloc: A,
     initial: *const u8,
-    _fixed: FixedAlloc<'a>,
+    _fixed: Fixed<'a>,
 }
 
-impl<'a, A> SpillAlloc<'a, A> {
-    pub(crate) const fn new(alloc: A, initial: *const u8, fixed: FixedAlloc<'a>) -> Self {
+impl<'a, A> Spill<'a, A> {
+    pub(crate) const fn new(alloc: A, initial: *const u8, fixed: Fixed<'a>) -> Self {
         Self {
             alloc,
             initial,
@@ -378,14 +378,14 @@ impl<'a, A> SpillAlloc<'a, A> {
     }
 }
 
-impl<A: Default + Allocator> Default for SpillAlloc<'_, A> {
+impl<A: Default + Allocator> Default for Spill<'_, A> {
     #[inline]
     fn default() -> Self {
-        Self::new(A::default(), ptr::null(), FixedAlloc::DEFAULT)
+        Self::new(A::default(), ptr::null(), Fixed::DEFAULT)
     }
 }
 
-unsafe impl<A: Allocator> Allocator for SpillAlloc<'_, A> {
+unsafe impl<A: Allocator> Allocator for Spill<'_, A> {
     #[inline]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         self.alloc.allocate(layout)
@@ -399,14 +399,14 @@ unsafe impl<A: Allocator> Allocator for SpillAlloc<'_, A> {
     }
 }
 
-impl<'a, A: Default + Allocator> Clone for SpillAlloc<'a, A> {
+impl<'a, A: Default + Allocator> Clone for Spill<'a, A> {
     fn clone(&self) -> Self {
         Self::default()
     }
 }
 
-impl<'a, A: AllocatorDefault> AllocatorDefault for SpillAlloc<'a, A> {
-    const DEFAULT: Self = Self::new(A::DEFAULT, ptr::null(), FixedAlloc::DEFAULT);
+impl<'a, A: AllocatorDefault> AllocatorDefault for Spill<'a, A> {
+    const DEFAULT: Self = Self::new(A::DEFAULT, ptr::null(), Fixed::DEFAULT);
 }
 
 #[cfg(feature = "zeroize")]
@@ -440,16 +440,16 @@ impl<A: AllocatorDefault> AllocatorDefault for ZeroizingAlloc<A> {
 }
 
 #[cfg(feature = "zeroize")]
-impl<'a, Z> WithAlloc<'a> for &'a mut zeroize::Zeroizing<Z>
+impl<'a, Z> SpillAlloc<'a> for &'a mut zeroize::Zeroizing<Z>
 where
     Z: Zeroize + 'a,
-    &'a mut Z: WithAlloc<'a>,
+    &'a mut Z: SpillAlloc<'a>,
 {
-    type NewIn<A: 'a> = <&'a mut Z as WithAlloc<'a>>::NewIn<ZeroizingAlloc<A>>;
+    type NewIn<A: 'a> = <&'a mut Z as SpillAlloc<'a>>::NewIn<ZeroizingAlloc<A>>;
 
     #[inline]
-    fn with_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A> {
-        (&mut **self).with_alloc_in(ZeroizingAlloc(alloc))
+    fn spill_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A> {
+        (&mut **self).spill_alloc_in(ZeroizingAlloc(alloc))
     }
 }
 

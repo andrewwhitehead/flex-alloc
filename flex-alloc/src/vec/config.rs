@@ -7,7 +7,7 @@ use core::ptr::{self, NonNull};
 
 use const_default::ConstDefault;
 
-use crate::alloc::{AllocateIn, Allocator, AllocatorDefault, FixedAlloc, Global, SpillAlloc};
+use crate::alloc::{AllocateIn, Allocator, AllocatorDefault, Fixed, Global, Spill};
 use crate::error::StorageError;
 use crate::index::{Grow, GrowDoubling, GrowExact, Index};
 use crate::storage::{ArrayStorage, FatBuffer, Inline, InlineBuffer, SpillStorage, ThinBuffer};
@@ -368,7 +368,7 @@ impl<T, A: Allocator, I: Index, G: Grow> VecNewIn<T> for Custom<A, I, G> {
 }
 
 impl<'a, T, const N: usize> VecNewIn<T> for &'a mut ArrayStorage<T, N> {
-    type Config = FixedAlloc<'a>;
+    type Config = Fixed<'a>;
 
     #[inline]
     fn buffer_try_new_in(
@@ -388,13 +388,13 @@ impl<'a, T, const N: usize> VecNewIn<T> for &'a mut ArrayStorage<T, N> {
                 length: Index::ZERO,
             },
             unsafe { NonNull::new_unchecked(self.0.as_mut_ptr()) }.cast(),
-            FixedAlloc::default(),
+            Fixed::default(),
         ))
     }
 }
 
 impl<'a, T, A: Allocator> VecNewIn<T> for SpillStorage<'a, &'a mut [MaybeUninit<T>], A> {
-    type Config = SpillAlloc<'a, A>;
+    type Config = Spill<'a, A>;
 
     fn buffer_try_new_in(
         self,
@@ -407,7 +407,7 @@ impl<'a, T, A: Allocator> VecNewIn<T> for SpillStorage<'a, &'a mut [MaybeUninit<
                     capacity,
                     length: Index::ZERO,
                 },
-                SpillAlloc::new(self.alloc, ptr::null(), FixedAlloc::DEFAULT),
+                Spill::new(self.alloc, ptr::null(), Fixed::DEFAULT),
                 exact,
             );
         }
@@ -421,7 +421,7 @@ impl<'a, T, A: Allocator> VecNewIn<T> for SpillStorage<'a, &'a mut [MaybeUninit<
                 length: Index::ZERO,
             },
             unsafe { NonNull::new_unchecked(ptr) }.cast(),
-            SpillAlloc::new(self.alloc, ptr.cast(), FixedAlloc::DEFAULT),
+            Spill::new(self.alloc, ptr.cast(), Fixed::DEFAULT),
         ))
     }
 }

@@ -7,7 +7,7 @@ use core::ptr::NonNull;
 use core::slice;
 
 use flex_alloc::{
-    alloc::{Allocator, Global, WithAlloc, ZeroizingAlloc},
+    alloc::{Allocator, SpillAlloc, Global, ZeroizingAlloc},
     storage::{array_storage, byte_storage},
     vec,
     vec::{Vec as FlexVec, ZeroizingVec},
@@ -119,7 +119,7 @@ fn vec_zeroizing_byte_storage() {
 #[test]
 fn vec_zeroizing_array_storage_spill() {
     let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
-    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
+    let mut v = FlexVec::<usize, _>::new_in(z.spill_alloc());
     v.extend([1, 2, 3]);
 }
 
@@ -127,7 +127,7 @@ fn vec_zeroizing_array_storage_spill() {
 fn vec_zeroizing_array_storage_spill_verify() {
     let alloc = TestAlloc::new(Global);
     let mut z = zeroize::Zeroizing::new(array_storage::<usize, 1>());
-    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc_in(&alloc));
+    let mut v = FlexVec::<usize, _>::new_in(z.spill_alloc_in(&alloc));
     v.extend([1, 2, 3]);
     drop(v);
     let log = alloc.released.borrow().clone();
@@ -138,7 +138,7 @@ fn vec_zeroizing_array_storage_spill_verify() {
 #[test]
 fn vec_zeroizing_byte_storage_spill() {
     let mut z = zeroize::Zeroizing::new(byte_storage::<10>());
-    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc());
+    let mut v = FlexVec::<usize, _>::new_in(z.spill_alloc());
     v.extend([1, 2, 3]);
 }
 
@@ -146,7 +146,7 @@ fn vec_zeroizing_byte_storage_spill() {
 fn vec_zeroizing_byte_storage_spill_verify() {
     let alloc = TestAlloc::new(Global);
     let mut z = zeroize::Zeroizing::new(byte_storage::<10>());
-    let mut v = FlexVec::<usize, _>::new_in(z.with_alloc_in(&alloc));
+    let mut v = FlexVec::<usize, _>::new_in(z.spill_alloc_in(&alloc));
     v.extend([1, 2, 3]);
     drop(v);
     let log = alloc.released.borrow().clone();

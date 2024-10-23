@@ -20,7 +20,7 @@ use flex_alloc::{
 
 #[cfg(feature = "alloc")]
 use flex_alloc::{
-    alloc::{Global, WithAlloc},
+    alloc::{Global, SpillAlloc},
     vec,
     vec::{
         config::{Custom, Thin},
@@ -538,15 +538,15 @@ fn vec_new_in_array() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn vec_new_in_array_with_alloc() {
+fn vec_new_in_array_spill_alloc() {
     let mut z = array_storage::<_, 3>();
     // alloc will fit inside array storage
-    let mut b = FlexVec::new_in(z.with_alloc());
+    let mut b = FlexVec::new_in(z.spill_alloc());
     b.push(32);
     drop(b);
 
     // alloc will not fit inside array storage
-    let mut b = FlexVec::from_slice_in(&[0, 1, 2, 3, 4, 5, 6, 7], z.with_alloc());
+    let mut b = FlexVec::from_slice_in(&[0, 1, 2, 3, 4, 5, 6, 7], z.spill_alloc());
     b.extend_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
 }
 
@@ -577,15 +577,15 @@ fn vec_new_in_bytes() {
 
 #[cfg(feature = "alloc")]
 #[test]
-fn vec_new_in_bytes_with_alloc() {
+fn vec_new_in_bytes_spill_alloc() {
     let mut z = byte_storage::<20>();
     // alloc should fit inside byte storage
-    let mut b = FlexVec::new_in(z.with_alloc());
+    let mut b = FlexVec::new_in(z.spill_alloc());
     b.push(32);
     drop(b);
 
     // alloc will not fit inside byte storage
-    let mut b = FlexVec::from_slice_in(&[0, 1, 2, 3, 4, 5, 6, 7], z.with_alloc());
+    let mut b = FlexVec::from_slice_in(&[0, 1, 2, 3, 4, 5, 6, 7], z.spill_alloc());
     b.extend_from_slice(&[0, 1, 2, 3, 4, 5, 6, 7]);
 }
 

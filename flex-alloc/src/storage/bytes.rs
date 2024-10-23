@@ -6,7 +6,7 @@ use core::ptr::NonNull;
 use const_default::ConstDefault;
 
 use super::{spill::SpillStorage, utils::layout_aligned_bytes};
-use crate::alloc::{AllocError, AllocateIn, Allocator, FixedAlloc, WithAlloc};
+use crate::alloc::{AllocError, AllocateIn, Allocator, Fixed, SpillAlloc};
 
 /// A reusable storage buffer consisting of an array of bytes.
 #[repr(C)]
@@ -23,12 +23,12 @@ impl<T, const N: usize> ByteStorage<T, N> {
 }
 
 impl<'a, T, const N: usize> AllocateIn for &'a mut ByteStorage<T, N> {
-    type Alloc = FixedAlloc<'a>;
+    type Alloc = Fixed<'a>;
 
     #[inline]
     fn allocate_in(self, layout: Layout) -> Result<(NonNull<[u8]>, Self::Alloc), AllocError> {
         let ptr = layout_aligned_bytes(self.as_uninit_slice(), layout).map_err(|_| AllocError)?;
-        let alloc = FixedAlloc::default();
+        let alloc = Fixed::default();
         Ok((ptr, alloc))
     }
 }
@@ -52,11 +52,11 @@ impl<T, const N: usize> Default for ByteStorage<T, N> {
     }
 }
 
-impl<'a, T: 'static, const N: usize> WithAlloc<'a> for &'a mut ByteStorage<T, N> {
+impl<'a, T: 'static, const N: usize> SpillAlloc<'a> for &'a mut ByteStorage<T, N> {
     type NewIn<A: 'a> = SpillStorage<'a, Self, A>;
 
     #[inline]
-    fn with_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A> {
+    fn spill_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A> {
         SpillStorage::new_in(self, alloc)
     }
 }

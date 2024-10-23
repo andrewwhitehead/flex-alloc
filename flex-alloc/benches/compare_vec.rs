@@ -6,7 +6,7 @@ use core::mem::size_of;
 use criterion::{black_box, Criterion};
 
 use flex_alloc::{
-    alloc::WithAlloc,
+    alloc::SpillAlloc,
     storage::{aligned_byte_storage, array_storage, Inline},
     vec::{config::Thin, Vec as FlexVec},
 };
@@ -102,7 +102,7 @@ fn standard_compare(c: &mut Criterion) {
                 b.iter(|| {
                     let mut buf =
                         aligned_byte_storage::<usize, { SMALL_COUNT * size_of::<usize>() }>();
-                    let mut vec = FlexVec::new_in(buf.with_alloc());
+                    let mut vec = FlexVec::new_in(buf.spill_alloc());
                     for value in 0..count {
                         vec.push(black_box(value));
                     }

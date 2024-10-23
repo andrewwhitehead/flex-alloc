@@ -24,10 +24,10 @@
 //!
 //! ```
 //! # #[cfg(feature = "alloc")] {
-//! use flex_alloc::{alloc::WithAlloc, storage::array_storage, vec::Vec};
+//! use flex_alloc::{alloc::SpillAlloc, storage::array_storage, vec::Vec};
 //!
 //! let mut buf = array_storage::<_, 100>();
-//! let mut v = Vec::new_in(buf.with_alloc());
+//! let mut v = Vec::new_in(buf.spill_alloc());
 //! v.extend(1..1000);
 //! # }
 //! ```
@@ -57,16 +57,16 @@
 //!
 //! Fixed storage buffers may be wrapped in `zeroize::Zeroizing`. Allocations
 //! produced on overflow when
-//! [`WithAlloc::with_alloc`][crate::alloc::WithAlloc::with_alloc] is used will
+//! [`SpillAlloc::spill_alloc`][crate::alloc::SpillAlloc::spill_alloc] is used will
 //! automatically be zeroized as well.
 //!
 //! ```
 //! # #[cfg(feature = "zeroize")] {
-//! use flex_alloc::{alloc::WithAlloc, storage::array_storage, vec::Vec};
+//! use flex_alloc::{alloc::SpillAlloc, storage::array_storage, vec::Vec};
 //! use zeroize::Zeroizing;
 //!
 //! let mut buf = Zeroizing::new(array_storage::<usize, 10>());
-//! let v = Vec::new_in(buf.with_alloc());
+//! let v = Vec::new_in(buf.spill_alloc());
 //! # }
 //! ```
 //!

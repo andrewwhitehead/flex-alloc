@@ -3,7 +3,7 @@ use core::{fmt, mem::MaybeUninit};
 use const_default::ConstDefault;
 
 use super::spill::SpillStorage;
-use crate::alloc::{Allocator, WithAlloc};
+use crate::alloc::{Allocator, SpillAlloc};
 
 /// A storage buffer consisting of an uninitialized `MaybeUnit` array.
 #[repr(transparent)]
@@ -33,11 +33,11 @@ impl<T, const N: usize> Default for ArrayStorage<T, N> {
     }
 }
 
-impl<'a, T: 'a, const N: usize> WithAlloc<'a> for &'a mut ArrayStorage<T, N> {
+impl<'a, T: 'a, const N: usize> SpillAlloc<'a> for &'a mut ArrayStorage<T, N> {
     type NewIn<A: 'a> = SpillStorage<'a, &'a mut [MaybeUninit<T>], A>;
 
     #[inline]
-    fn with_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A> {
+    fn spill_alloc_in<A: Allocator + 'a>(self, alloc: A) -> Self::NewIn<A> {
         SpillStorage::new_in(&mut self.0, alloc)
     }
 }
