@@ -1,5 +1,5 @@
 use flex_alloc_secure::alloc::{
-    alloc_pages, dealloc_pages, default_page_size, lock_memory, unlock_memory,
+    alloc_pages, dealloc_pages, default_page_size, lock_pages, unlock_pages,
 };
 
 #[test]
@@ -24,8 +24,8 @@ fn check_alloc_aligned() {
 fn check_lock_aligned() {
     let len = 256;
     let mut page = alloc_pages(len).expect("error allocating");
-    lock_memory(page.as_ptr().cast(), page.len()).expect("error locking page");
-    unlock_memory(page.as_ptr().cast(), page.len()).expect("error unlocking page");
+    lock_pages(page.as_ptr().cast(), page.len()).expect("error locking page");
+    unlock_pages(page.as_ptr().cast(), page.len()).expect("error unlocking page");
     unsafe { page.as_mut() }.fill(1u8);
     dealloc_pages(page.as_ptr().cast(), len);
 }

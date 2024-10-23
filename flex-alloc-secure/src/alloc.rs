@@ -170,7 +170,7 @@ pub fn dealloc_pages(addr: *mut u8, len: usize) {
 
 /// Prevent swapping for the given memory range.
 /// On supported platforms, avoid including the memory in core dumps.
-pub fn lock_memory(addr: *mut u8, len: usize) -> Result<(), MemoryError> {
+pub fn lock_pages(addr: *mut u8, len: usize) -> Result<(), MemoryError> {
     #[cfg(miri)]
     {
         _ = (addr, len);
@@ -202,7 +202,7 @@ pub fn lock_memory(addr: *mut u8, len: usize) -> Result<(), MemoryError> {
 }
 
 /// Resume normal swapping behavior for the given memory range.
-pub fn unlock_memory(addr: *mut u8, len: usize) -> Result<(), MemoryError> {
+pub fn unlock_pages(addr: *mut u8, len: usize) -> Result<(), MemoryError> {
     #[cfg(miri)]
     {
         _ = (addr, len);
@@ -234,7 +234,11 @@ pub fn unlock_memory(addr: *mut u8, len: usize) -> Result<(), MemoryError> {
 }
 
 /// Adjust the protection mode for a given memory range.
-pub fn set_protection(addr: *mut u8, len: usize, mode: ProtectionMode) -> Result<(), MemoryError> {
+pub fn set_page_protection(
+    addr: *mut u8,
+    len: usize,
+    mode: ProtectionMode,
+) -> Result<(), MemoryError> {
     #[cfg(miri)]
     {
         _ = (addr, len, mode);
@@ -289,7 +293,7 @@ pub fn page_rounded_length(len: usize, page_size: usize) -> usize {
 pub struct SecureAlloc;
 
 impl SecureAlloc {
-    pub(crate) fn set_protection(
+    pub(crate) fn set_page_protection(
         &self,
         ptr: *mut u8,
         len: usize,
@@ -297,7 +301,7 @@ impl SecureAlloc {
     ) -> Result<(), StorageError> {
         if len != 0 {
             let alloc_len = page_rounded_length(len, default_page_size());
-            set_protection(ptr, alloc_len, mode).map_err(|_| StorageError::ProtectionError)
+            set_page_protection(ptr, alloc_len, mode).map_err(|_| StorageError::ProtectionError)
         } else {
             Ok(())
         }
@@ -325,7 +329,7 @@ unsafe impl Allocator for SecureAlloc {
             unsafe { ptr::write_bytes(alloc.as_ptr().cast::<u8>(), UNINIT_ALLOC_BYTE, alloc_len) };
 
             // Keep data page(s) out of swap
-            lock_memory(alloc.as_ptr().cast(), alloc_len).map_err(|_| AllocError)?;
+            lock_pages(alloc.as_ptr().cast(), alloc_len).map_err(|_| AllocError)?;
 
             Ok(alloc)
         }
@@ -342,7 +346,7 @@ unsafe impl Allocator for SecureAlloc {
             mem.zeroize();
 
             // Restore normal swapping behavior
-            unlock_memory(ptr.as_ptr().cast(), alloc_len).ok();
+            unlock_pages(ptr.as_ptr().cast(), alloc_len).ok();
 
             // Free the memory
             dealloc_pages(ptr.as_ptr(), alloc_len);

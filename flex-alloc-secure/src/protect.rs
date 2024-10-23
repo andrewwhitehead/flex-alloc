@@ -23,6 +23,22 @@ pub trait Protect {
     fn protect(self) -> ProtectedBox<Self::Value>;
 }
 
+impl<T: ?Sized> Protect for SecureBox<T> {
+    type Value = T;
+
+    fn protect(self) -> ProtectedBox<T> {
+        ProtectedBox::from(self)
+    }
+}
+
+impl<T> Protect for SecureVec<T> {
+    type Value = [T];
+
+    fn protect(self) -> ProtectedBox<[T]> {
+        ProtectedBox::from(self)
+    }
+}
+
 /// Provide read-only access to a protected value.
 pub trait ReadProtected {
     /// The type of the contained value.
@@ -77,7 +93,7 @@ impl<T: ?Sized> ProtectedBox<T> {
         let data = boxed.as_mut_ptr().cast();
         boxed
             .allocator()
-            .set_protection(data, size, mode)
+            .set_page_protection(data, size, mode)
             .expect("Error setting protection mode")
     }
 
