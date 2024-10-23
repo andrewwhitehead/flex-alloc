@@ -7,7 +7,7 @@ use core::ptr::NonNull;
 use core::slice;
 
 use flex_alloc::{
-    alloc::{Allocator, SpillAlloc, Global, ZeroizingAlloc},
+    alloc::{Allocator, Global, SpillAlloc, ZeroizingAlloc},
     storage::{array_storage, byte_storage},
     vec,
     vec::{Vec as FlexVec, ZeroizingVec},
