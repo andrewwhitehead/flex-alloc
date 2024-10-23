@@ -15,26 +15,26 @@ use crate::boxed::SecureBox;
 use crate::vec::SecureVec;
 
 /// Convert a secure collection type into a [`ProtectedBox`].
-pub trait Protect {
+pub trait IntoProtected {
     /// The value type of the [`ProtectedBox`].
     type Value: ?Sized;
 
     /// Convert this collection into a [`ProtectedBox`].
-    fn protect(self) -> ProtectedBox<Self::Value>;
+    fn into_protected(self) -> ProtectedBox<Self::Value>;
 }
 
-impl<T: ?Sized> Protect for SecureBox<T> {
+impl<T: ?Sized> IntoProtected for SecureBox<T> {
     type Value = T;
 
-    fn protect(self) -> ProtectedBox<T> {
+    fn into_protected(self) -> ProtectedBox<T> {
         ProtectedBox::from(self)
     }
 }
 
-impl<T> Protect for SecureVec<T> {
+impl<T> IntoProtected for SecureVec<T> {
     type Value = [T];
 
-    fn protect(self) -> ProtectedBox<[T]> {
+    fn into_protected(self) -> ProtectedBox<[T]> {
         ProtectedBox::from(self)
     }
 }
@@ -318,7 +318,7 @@ impl<T: ?Sized> Drop for ProtectedBoxMut<'_, T> {
 mod tests {
     use core::sync::atomic::Ordering;
 
-    use super::{Protect, ProtectedBox, ReadProtected};
+    use super::{IntoProtected, ProtectedBox, ReadProtected};
     use crate::{protect::WriteProtected, vec::SecureVec};
 
     #[test]
@@ -348,7 +348,7 @@ mod tests {
     fn protected_vec() {
         let mut vec = SecureVec::new();
         vec.resize(100, 1usize);
-        let boxed = vec.protect();
+        let boxed = vec.into_protected();
         assert_eq!(boxed.read_protected().len(), 100);
     }
 

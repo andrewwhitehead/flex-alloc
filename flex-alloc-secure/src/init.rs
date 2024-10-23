@@ -10,7 +10,7 @@ use rand_core::RngCore;
 use zeroize::{DefaultIsZeroes, Zeroize};
 
 use crate::boxed::SecureBox;
-use crate::protect::Protect;
+use crate::protect::IntoProtected;
 use crate::vec::SecureVec;
 
 /// Access a value as a mutable slice of bytes.
@@ -53,7 +53,7 @@ unsafe impl<T: Copy + FillBytes, const N: usize> FillBytes for [T; N] {}
 unsafe impl<T: Copy + FillBytes> FillBytes for [T] where [T]: Zeroize {}
 
 /// Securely initialize a container type for a sized value.
-pub trait SecureInit: Protect + Sized {
+pub trait SecureInit: IntoProtected + Sized {
     /// The type of the contained value.
     type Inner;
     /// The type of the uninitialized container.
@@ -119,7 +119,7 @@ impl<T> SecureInit for SecureBox<T> {
 }
 
 /// Securely initialize a container type for a slice of elements.
-pub trait SecureInitSlice: Protect + Sized {
+pub trait SecureInitSlice: IntoProtected + Sized {
     /// The type of the contained element.
     type Item;
     /// The index type of the collection.

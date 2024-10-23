@@ -3,7 +3,7 @@ use core::mem::size_of;
 use flex_alloc_secure::{
     alloc::UNINIT_ALLOC_BYTE,
     boxed::SecureBox,
-    protect::{Protect, ProtectedBox, ReadProtected, WriteProtected},
+    protect::{IntoProtected, ProtectedBox, ReadProtected, WriteProtected},
     vec::SecureVec,
 };
 
@@ -13,7 +13,7 @@ const UNINIT_USIZE: usize = usize::from_ne_bytes([UNINIT_ALLOC_BYTE; size_of::<u
 fn protected_box() {
     let sec = SecureBox::<usize>::new_uninit();
     assert_eq!(unsafe { sec.as_ref().assume_init() }, UNINIT_USIZE);
-    let prot = sec.write(99usize).protect();
+    let prot = sec.write(99usize).into_protected();
     assert_eq!(prot.read_protected().as_ref(), &99usize);
 
     let mut prot = ProtectedBox::from(&[10, 9, 8]);
@@ -35,7 +35,7 @@ fn protected_vec() {
         UNINIT_USIZE
     );
     sec.extend_from_slice(&[5, 4, 3]);
-    let mut prot = sec.protect();
+    let mut prot = sec.into_protected();
     assert_eq!(prot.read_protected().as_ref(), &[5, 4, 3]);
     prot.write_protected()[0] = 6;
     assert_eq!(prot.read_protected().as_ref(), &[6, 4, 3]);
