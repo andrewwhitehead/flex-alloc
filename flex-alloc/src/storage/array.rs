@@ -1,5 +1,7 @@
 use core::{fmt, mem::MaybeUninit};
 
+use const_default::ConstDefault;
+
 use super::spill::SpillStorage;
 use crate::alloc::{Allocator, WithAlloc};
 
@@ -8,9 +10,6 @@ use crate::alloc::{Allocator, WithAlloc};
 pub struct ArrayStorage<T, const N: usize>(pub [MaybeUninit<T>; N]);
 
 impl<T, const N: usize> ArrayStorage<T, N> {
-    /// Constant initializer.
-    pub const DEFAULT: Self = Self(unsafe { MaybeUninit::uninit().assume_init() });
-
     /// Access the buffer contents as a mutable slice.
     pub fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<T>] {
         &mut self.0
@@ -21,6 +20,10 @@ impl<T, const N: usize> fmt::Debug for ArrayStorage<T, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ArrayStorage").finish_non_exhaustive()
     }
+}
+
+impl<T, const N: usize> ConstDefault for ArrayStorage<T, N> {
+    const DEFAULT: Self = Self(unsafe { MaybeUninit::uninit().assume_init() });
 }
 
 impl<T, const N: usize> Default for ArrayStorage<T, N> {

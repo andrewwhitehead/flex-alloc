@@ -3,6 +3,8 @@ use core::fmt;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::NonNull;
 
+use const_default::ConstDefault;
+
 use super::{spill::SpillStorage, utils::layout_aligned_bytes};
 use crate::alloc::{AllocError, AllocateIn, Allocator, FixedAlloc, WithAlloc};
 
@@ -14,11 +16,6 @@ pub union ByteStorage<T, const N: usize> {
 }
 
 impl<T, const N: usize> ByteStorage<T, N> {
-    /// Constant initializer.
-    pub const DEFAULT: Self = Self {
-        data: unsafe { MaybeUninit::uninit().assume_init() },
-    };
-
     /// Access the buffer contents as a mutable slice.
     pub fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<u8>] {
         unsafe { &mut self.data }
@@ -34,6 +31,12 @@ impl<'a, T, const N: usize> AllocateIn for &'a mut ByteStorage<T, N> {
         let alloc = FixedAlloc::default();
         Ok((ptr, alloc))
     }
+}
+
+impl<T, const N: usize> ConstDefault for ByteStorage<T, N> {
+    const DEFAULT: Self = Self {
+        data: unsafe { MaybeUninit::uninit().assume_init() },
+    };
 }
 
 impl<T, const N: usize> fmt::Debug for ByteStorage<T, N> {

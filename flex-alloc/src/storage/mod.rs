@@ -1,5 +1,7 @@
 //! Backing storage types for collections.
 
+use const_default::ConstDefault;
+
 mod alloc;
 mod array;
 mod bytes;
