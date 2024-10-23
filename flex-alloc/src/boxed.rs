@@ -1,10 +1,12 @@
-//! Support for placing values within allocated memory.
+//! Support for values contained within allocated memory.
 
 use core::alloc::Layout;
-use core::any::type_name;
+use core::borrow;
+use core::cmp::Ordering;
 use core::mem::{size_of, ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
+use core::str;
 use core::{fmt, ptr};
 
 #[cfg(feature = "zeroize")]
@@ -48,6 +50,15 @@ impl<T: ?Sized, A: Allocator> RawBox<T, A> {
     #[inline]
     pub fn layout(&self) -> Layout {
         Layout::for_value(unsafe { self.ptr.as_ref() })
+    }
+
+    #[inline]
+    pub unsafe fn cast<U>(self) -> RawBox<U, A> {
+        let (ptr, alloc) = self.into_parts();
+        RawBox::from_parts(
+            unsafe { NonNull::new_unchecked(ptr.as_ptr().cast()) },
+            alloc,
+        )
     }
 }
 
@@ -352,6 +363,32 @@ impl<T, A: Allocator> Box<[T], A> {
     }
 }
 
+impl<A: Allocator> Box<str, A> {
+    /// Convert a boxed slice of bytes into a `Box<str>`.
+    ///
+    /// If you are sure that the byte slice is valid UTF-8, and you don’t
+    /// want to incur the overhead of the validity check, there is an unsafe
+    /// version of this function, `from_utf8_unchecked`, which has the same
+    /// behavior but skips the check.
+    pub fn from_utf8(boxed: Box<[u8], A>) -> Result<Self, str::Utf8Error> {
+        let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
+        unsafe {
+            let strval = str::from_utf8_mut(&mut *ptr)?;
+            Ok(Self::from_raw_in(strval, alloc))
+        }
+    }
+
+    /// Convert a boxed slice of bytes into a `Box<str>`.
+    ///
+    /// # Safety
+    /// The contained bytes must be valid UTF-8.
+    pub unsafe fn from_utf8_unchecked(boxed: Box<[u8], A>) -> Self {
+        let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
+        let strval = str::from_utf8_unchecked_mut(&mut *ptr);
+        Self::from_raw_in(strval, alloc)
+    }
+}
+
 impl<T: Clone, A: AllocatorDefault> Box<[T], A> {
     /// Create a boxed slice by cloning a slice reference.
     pub fn from_slice(data: &[T]) -> Self {
@@ -531,6 +568,18 @@ impl<T: ?Sized, A: Allocator> AsMut<T> for Box<T, A> {
     }
 }
 
+impl<T: ?Sized, A: Allocator> borrow::Borrow<T> for Box<T, A> {
+    fn borrow(&self) -> &T {
+        self.handle.as_ref()
+    }
+}
+
+impl<T: ?Sized, A: Allocator> borrow::BorrowMut<T> for Box<T, A> {
+    fn borrow_mut(&mut self) -> &mut T {
+        self.handle.as_mut()
+    }
+}
+
 impl<T: Clone, A: Allocator + Clone> Clone for Box<T, A> {
     fn clone(&self) -> Self {
         let boxed = Self::new_uninit_in(self.allocator().clone());
@@ -544,9 +593,16 @@ impl<T: Clone, A: Allocator + Clone> Clone for Box<[T], A> {
     }
 }
 
-impl<T: ?Sized, A: Allocator> fmt::Debug for Box<T, A> {
+impl<A: Allocator + Clone> Clone for Box<str, A> {
+    fn clone(&self) -> Self {
+        let boxed = Box::<[u8], A>::from_slice_in(self.as_bytes(), self.allocator().clone());
+        unsafe { Box::from_utf8_unchecked(boxed) }
+    }
+}
+
+impl<T: ?Sized + fmt::Debug, A: Allocator> fmt::Debug for Box<T, A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("SecureBox<{}>", type_name::<T>()))
+        self.as_ref().fmt(f)
     }
 }
 
@@ -559,6 +615,12 @@ impl<T: Default, A: AllocatorDefault> Default for Box<T, A> {
 impl<T, A: AllocatorDefault> Default for Box<[T], A> {
     fn default() -> Self {
         Self::dangling(A::DEFAULT)
+    }
+}
+
+impl<A: AllocatorDefault> Default for Box<str, A> {
+    fn default() -> Self {
+        unsafe { Box::from_utf8_unchecked(Box::dangling(A::DEFAULT)) }
     }
 }
 
@@ -576,6 +638,21 @@ impl<T: ?Sized, A: Allocator> DerefMut for Box<T, A> {
     }
 }
 
+impl<T: ?Sized, A: Allocator> Drop for Box<T, A> {
+    fn drop(&mut self) {
+        unsafe {
+            ptr::drop_in_place(self.handle.as_mut());
+        }
+    }
+}
+
+impl<T: Clone, A: AllocatorDefault> From<T> for Box<T, A> {
+    #[inline]
+    fn from(value: T) -> Self {
+        Self::new_uninit().write(value)
+    }
+}
+
 impl<T: Clone, A: AllocatorDefault> From<&T> for Box<T, A> {
     fn from(value: &T) -> Self {
         Self::new_uninit().write(value.clone())
@@ -588,9 +665,57 @@ impl<T: Clone, A: AllocatorDefault> From<&[T]> for Box<[T], A> {
     }
 }
 
+impl<T: Clone, A: AllocatorDefault, const N: usize> From<[T; N]> for Box<[T], A> {
+    fn from(data: [T; N]) -> Self {
+        Self::from_slice(&data)
+    }
+}
+
+impl<A: AllocatorDefault> From<&str> for Box<str, A> {
+    fn from(data: &str) -> Self {
+        let boxed = Box::from_slice(data.as_bytes());
+        unsafe { Self::from_utf8_unchecked(boxed) }
+    }
+}
+
 impl<T, A: Allocator> From<Vec<T, A>> for Box<[T], A> {
     fn from(vec: Vec<T, A>) -> Self {
         vec.into_boxed_slice()
+    }
+}
+
+impl<T, A: AllocatorDefault> FromIterator<T> for Box<[T], A> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Vec::<T, A>::from_iter(iter).into_boxed_slice()
+    }
+}
+
+impl<T, A: Allocator, const N: usize> TryFrom<Box<[T], A>> for Box<[T; N], A> {
+    type Error = Box<[T], A>;
+
+    fn try_from(boxed: Box<[T], A>) -> Result<Self, Self::Error> {
+        if boxed.len() == N {
+            Ok(Self {
+                handle: unsafe { boxed.into_handle().cast() },
+            })
+        } else {
+            Err(boxed)
+        }
+    }
+}
+
+impl<T, A: Allocator, const N: usize> TryFrom<Vec<T, A>> for Box<[T; N], A> {
+    type Error = Vec<T, A>;
+
+    fn try_from(vec: Vec<T, A>) -> Result<Self, Self::Error> {
+        if vec.len() == N {
+            let boxed = vec.into_boxed_slice();
+            Ok(Self {
+                handle: unsafe { boxed.into_handle().cast() },
+            })
+        } else {
+            Err(vec)
+        }
     }
 }
 
@@ -626,16 +751,33 @@ impl<T: ?Sized, A: Allocator> ConvertAlloc<alloc_crate::boxed::Box<T, A>> for Bo
     }
 }
 
-impl<T: ?Sized, A: Allocator> Drop for Box<T, A> {
-    fn drop(&mut self) {
-        unsafe {
-            ptr::drop_in_place(self.handle.as_mut());
-        }
+impl<T: ?Sized + PartialEq, A: Allocator> PartialEq for Box<T, A> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        PartialEq::eq(self.as_ref(), other.as_ref())
+    }
+}
+
+impl<T: ?Sized + Eq, A: Allocator> Eq for Box<T, A> {}
+
+impl<T: ?Sized + PartialOrd, A: Allocator> PartialOrd for Box<T, A> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
+    }
+}
+
+impl<T: ?Sized + Ord, A: Allocator> Ord for Box<T, A> {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        Ord::cmp(&**self, &**other)
     }
 }
 
 unsafe impl<T: Send + ?Sized, A: Allocator + Send> Send for Box<T, A> {}
 unsafe impl<T: Sync + ?Sized, A: Allocator + Sync> Sync for Box<T, A> {}
+
+impl<T: ?Sized, A: Allocator> Unpin for Box<T, A> {}
 
 #[cfg(feature = "zeroize")]
 impl<T: ?Sized + Zeroize, A: Allocator> Zeroize for Box<T, A> {
