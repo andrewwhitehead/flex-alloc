@@ -9,15 +9,6 @@ use rstest::rstest;
 
 #[cfg(feature = "alloc")]
 use const_default::ConstDefault;
-use flex_alloc::{
-    index::Index,
-    storage::{aligned_byte_storage, array_storage, byte_storage, Inline},
-    vec::{
-        config::{VecConfig, VecConfigNew, VecNewIn},
-        InlineVec, Vec as FlexVec,
-    },
-};
-
 #[cfg(feature = "alloc")]
 use flex_alloc::{
     alloc::{Global, SpillAlloc},
@@ -27,10 +18,18 @@ use flex_alloc::{
         ThinVec,
     },
 };
+use flex_alloc::{
+    capacity::Index,
+    storage::{aligned_byte_storage, array_storage, byte_storage, Inline},
+    vec::{
+        config::{VecConfig, VecConfigNew, VecNewIn},
+        InlineVec, Vec as FlexVec,
+    },
+};
 
 const SLICE: &[usize] = &[1, 2, 3, 4, 5];
 
-#[derive(Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 struct Zst;
 
 #[rstest]
