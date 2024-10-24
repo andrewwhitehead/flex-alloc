@@ -375,8 +375,8 @@ impl<A: Allocator> Box<str, A> {
     ///
     /// If you are sure that the byte slice is valid UTF-8, and you don’t
     /// want to incur the overhead of the validity check, there is an unsafe
-    /// version of this function, `from_utf8_unchecked`, which has the same
-    /// behavior but skips the check.
+    /// version of this function, [`Box::from_utf8_unchecked`], which has the
+    /// same behavior but skips the check.
     pub fn from_utf8(boxed: Box<[u8], A>) -> Result<Self, str::Utf8Error> {
         let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
         unsafe {
@@ -542,9 +542,9 @@ impl<T, A: Allocator> Box<MaybeUninit<T>, A> {
     /// this method may improve performance because the compiler may be able to optimize
     /// copying from stack.
     #[inline(always)]
-    pub fn write(self, value: T) -> Box<T, A> {
+    pub fn write(boxed: Self, value: T) -> Box<T, A> {
         Box {
-            handle: self.into_handle().write(value),
+            handle: boxed.into_handle().write(value),
         }
     }
 }
@@ -590,7 +590,7 @@ impl<T: ?Sized, A: Allocator> borrow::BorrowMut<T> for Box<T, A> {
 impl<T: Clone, A: Allocator + Clone> Clone for Box<T, A> {
     fn clone(&self) -> Self {
         let boxed = Self::new_uninit_in(self.allocator().clone());
-        boxed.write(self.as_ref().clone())
+        Box::write(boxed, self.as_ref().clone())
     }
 }
 
@@ -656,13 +656,13 @@ impl<T: ?Sized, A: Allocator> Drop for Box<T, A> {
 impl<T: Clone, A: AllocatorDefault> From<T> for Box<T, A> {
     #[inline]
     fn from(value: T) -> Self {
-        Self::new_uninit().write(value)
+        Box::write(Self::new_uninit(), value)
     }
 }
 
 impl<T: Clone, A: AllocatorDefault> From<&T> for Box<T, A> {
     fn from(value: &T) -> Self {
-        Self::new_uninit().write(value.clone())
+        Box::write(Self::new_uninit(), value.clone())
     }
 }
 
