@@ -7,8 +7,8 @@ use core::ptr::NonNull;
 use core::slice;
 
 use crate::alloc::Allocator;
+use crate::capacity::Index;
 use crate::error::StorageError;
-use crate::index::Index;
 use crate::storage::{BufferHeader, FatBuffer, InlineBuffer, RawBuffer, ThinBuffer};
 
 /// The header associated with each `Vec` instance.

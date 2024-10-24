@@ -6,7 +6,7 @@ use core::ptr;
 use super::buffer::VecBuffer;
 use super::drain::Drain;
 use super::index_panic;
-use crate::index::{Grow, Index};
+use crate::capacity::{Grow, Index};
 
 /// A struct used to manage an active `splice` operation for a `Vec` instance
 pub struct Splice<'s, I, B, G>

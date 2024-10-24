@@ -107,15 +107,22 @@
 //!
 //! ### Custom index sizes and growth behavior
 //!
-//! [`Vec`] may be parameterized to use an alternative index type when memory
-//! consumption is a concern. The supported index types are `u8`, `u16`,
-//! `u32`, and `usize` (the default).
+//! [`Vec`] may be parameterized to use an alternative index type and/or
+//! alternative growth pattern when memory consumption is a concern. The
+//! supported index types are `u8`, `u16`, `u32`, and `usize` (the default).
+//! The standard growth pattern is
+//! [`GrowDoubling`](crate::capacity::GrowDoubling), which matches the
+//! standard library behavior.
 //!
 //! ```
 //! # #[cfg(feature = "alloc")] {
-//! use flex_alloc::{alloc::Global, vec::{config::Custom, Vec}};
+//! use flex_alloc::{
+//!     alloc::Global,
+//!     capacity::GrowDoubling,
+//!     vec::{config::Custom, Vec}
+//! };
 //!
-//! type Cfg = Custom<Global, u8>;
+//! type Cfg = Custom<Global, u8, GrowDoubling>;
 //! let v = Vec::<usize, Cfg>::new();
 //! # }
 
@@ -135,8 +142,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::alloc::{AllocatorDefault, Global};
 use crate::boxed::Box;
+use crate::capacity::{Grow, Index};
 use crate::error::{StorageError, UpdateError};
-use crate::index::{Grow, Index};
 use crate::storage::{Inline, RawBuffer};
 
 use self::buffer::VecBuffer;
@@ -452,7 +459,8 @@ impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
 
     /// Creates a `Vec<T, C>` directly from a pointer, a length, a capacity, and an allocator.
     /// # Safety
-    /// The components must be a result of the [`into_raw_parts_with_alloc`] function.
+    /// The components must be a result of the
+    /// [`into_raw_parts_with_alloc`](Vec::into_raw_parts_with_alloc) function.
     #[inline]
     pub unsafe fn from_raw_parts_in(
         data: *mut T,
@@ -474,13 +482,14 @@ impl<T, C: VecConfigAlloc<T>> Vec<T, C> {
     ///
     /// Returns the raw pointer to the underlying data, the length of the vector (in elements),
     /// the allocated capacity of the data (in elements), and the allocator. These are the same
-    /// arguments in the same order as the arguments to [`from_raw_parts_in`].
+    /// arguments in the same order as the arguments to
+    /// [`Vec::from_raw_parts_in`].
     ///
     /// After calling this function, the caller is responsible for the
     /// memory previously managed by the `Vec`. The only way to do
     /// this is to convert the raw pointer, length, and capacity back
-    /// into a `Vec` with the [`from_raw_parts_in`] function, allowing
-    /// the destructor to perform the cleanup.
+    /// into a `Vec` with the [`Vec::from_raw_parts_in`]
+    /// function, allowing the destructor to perform the cleanup.
     #[inline]
     pub fn into_raw_parts_with_alloc(self) -> (*mut T, C::Index, C::Index, C::Alloc) {
         let (ptr, len, cap, alloc) = C::buffer_into_parts(self.into_inner());
@@ -512,7 +521,7 @@ where
 {
     /// Creates a `Vec<T, C>` directly from a pointer, a length, and a capacity.
     /// # Safety
-    /// The components must be a result of the [`into_raw_parts`] function.
+    /// The components must be a result of the [`Vec::into_raw_parts`] function.
     #[inline]
     pub unsafe fn from_raw_parts(data: *mut T, length: C::Index, capacity: C::Index) -> Self {
         Self {
@@ -530,12 +539,12 @@ where
     /// Returns the raw pointer to the underlying data, the length of
     /// the vector (in elements), and the allocated capacity of the
     /// data (in elements). These are the same arguments in the same
-    /// order as the arguments to [`from_raw_parts`].
+    /// order as the arguments to [`Vec::from_raw_parts`].
     ///
     /// After calling this function, the caller is responsible for the
     /// memory previously managed by the `Vec`. The only way to do
     /// this is to convert the raw pointer, length, and capacity back
-    /// into a `Vec` with the [`from_raw_parts`] function, allowing
+    /// into a `Vec` with the [`Vec::from_raw_parts`] function, allowing
     /// the destructor to perform the cleanup.
     #[inline]
     pub fn into_raw_parts(self) -> (*mut T, C::Index, C::Index) {

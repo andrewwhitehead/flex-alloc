@@ -1,6 +1,6 @@
 [package]
 name = "flex-alloc"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["Andrew Whitehead <cywolf@gmail.com>"]
 edition = "2021"
 description = "Data structures with extra flexible storage"

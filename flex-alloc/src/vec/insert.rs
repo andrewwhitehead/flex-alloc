@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 use core::ptr;
 use core::slice;
 
-use crate::index::Index;
+use crate::capacity::Index;
 
 use super::buffer::VecBuffer;
 

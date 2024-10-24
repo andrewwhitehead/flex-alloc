@@ -8,8 +8,8 @@ use core::ptr::{self, NonNull};
 use const_default::ConstDefault;
 
 use crate::alloc::{AllocateIn, Allocator, AllocatorDefault, Fixed, Global, Spill};
+use crate::capacity::{Grow, GrowDoubling, GrowExact, Index};
 use crate::error::StorageError;
-use crate::index::{Grow, GrowDoubling, GrowExact, Index};
 use crate::storage::{ArrayStorage, FatBuffer, Inline, InlineBuffer, SpillStorage, ThinBuffer};
 
 use super::buffer::{VecBuffer, VecHeader};

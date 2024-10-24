@@ -5,7 +5,7 @@ use core::ops::Range;
 use core::ptr;
 use core::slice;
 
-use crate::index::Index;
+use crate::capacity::Index;
 
 use super::buffer::VecBuffer;
 use super::index_panic;
