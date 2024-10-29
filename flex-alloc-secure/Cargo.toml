@@ -21,7 +21,18 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [dependencies]
+ascon-aead = "0.4"
 const-default = "1"
 flex-alloc = { path = "../flex-alloc", features = ["alloc", "zeroize"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = [
+    "cargo_bench_support",
+    "html_reports",
+] }
+
+[[bench]]
+name = "protect"
+harness = false

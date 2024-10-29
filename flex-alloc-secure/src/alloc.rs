@@ -1,4 +1,4 @@
-//! Virtual memory management for flex-alloc.
+//! Support for virtual memory management, including memory protections.
 
 use core::alloc::Layout;
 use core::mem::{self, transmute};
@@ -287,8 +287,11 @@ pub fn page_rounded_length(len: usize, page_size: usize) -> usize {
     len + ((page_size - (len & (page_size - 1))) % page_size)
 }
 
-/// An allocator which obtains memory pages using `mmap` and keeps the contents in
-/// physical memory. The contents are zeroized when dropped.
+/// An allocator which obtains a discrete number of virtual memory pages.
+///
+/// The virutal memory pages are flagged using `mlock` (`VirtualLock` on
+/// Windows) in order to restrict them to physical memory. When the
+/// allocation is released, the allocated memory is securely zeroed.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct SecureAlloc;
 
@@ -362,14 +365,25 @@ impl AllocatorZeroizes for SecureAlloc {}
 
 #[cfg(test)]
 mod tests {
+    use core::alloc::Layout;
+    use flex_alloc::alloc::Allocator;
+
+    use crate::{alloc::UNINIT_ALLOC_BYTE, vec::SecureVec};
+
     use super::SecureAlloc;
-    use crate::vec::Vec;
 
     #[test]
-    fn check_cap() {
-        let vec = Vec::<usize, SecureAlloc>::with_capacity(1);
+    fn check_extra_capacity() {
+        let vec = SecureVec::<usize>::with_capacity(1);
+        // We always allocate pages, so there should be plenty of room for more values.
         assert!(vec.capacity() > 1);
     }
 
-    // FIXME check uninited bytes
+    #[test]
+    fn check_uninit() {
+        let layout = Layout::new::<usize>();
+        let buf = SecureAlloc.allocate(layout).expect("allocation error");
+        assert!(!buf.is_empty() && unsafe { buf.as_ref() }[..4] == [UNINIT_ALLOC_BYTE; 4]);
+        unsafe { SecureAlloc.deallocate(buf.cast(), layout) };
+    }
 }

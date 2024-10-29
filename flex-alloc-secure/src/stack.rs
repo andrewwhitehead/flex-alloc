@@ -3,7 +3,6 @@
 use core::any::type_name;
 use core::fmt;
 use core::mem::{size_of, size_of_val, MaybeUninit};
-use core::ops::{Deref, DerefMut};
 use core::ptr;
 use core::slice;
 
@@ -13,7 +12,8 @@ use zeroize::Zeroize;
 
 use crate::{
     alloc::{lock_pages, unlock_pages, UNINIT_ALLOC_BYTE},
-    init::FillBytes,
+    bytes::FillBytes,
+    protect::SecureRef,
 };
 
 /// A stack-allocated value protected by locking its virtual memory page in physical memory.
@@ -22,21 +22,14 @@ use crate::{
 pub struct Secured<T: Copy>(MaybeUninit<T>);
 
 impl<T: Copy> Secured<T> {
-    /// Create a new, empty `Secured` to store a value `T`.
-    pub const fn new_uninit() -> Secured<T> {
-        Self::DEFAULT
-    }
-}
-
-impl<T: Copy> Secured<T> {
     /// For an existing `Secured` instance, fill with the default value
     /// of `T` and call the closure `f` with a mutable reference.
     pub fn borrow_default<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(SecuredMut<T>) -> R,
+        F: FnOnce(SecureRef<&mut T>) -> R,
         T: Default,
     {
-        let lock = SecuredLock::new(&mut self.0);
+        let lock = SecuredGuard::new(&mut self.0);
         lock.0.write(T::default());
         unsafe { lock.eval_inited(f) }
     }
@@ -46,10 +39,10 @@ impl<T: Copy> Secured<T> {
     /// a mutable reference.
     pub fn borrow_random<F, R>(&mut self, rng: impl RngCore, f: F) -> R
     where
-        F: FnOnce(SecuredMut<T>) -> R,
+        F: FnOnce(SecureRef<&mut T>) -> R,
         T: FillBytes,
     {
-        let mut lock = SecuredLock::new(&mut self.0);
+        let mut lock = SecuredGuard::new(&mut self.0);
         lock.fill_random(rng);
         unsafe { lock.eval_inited(f) }
     }
@@ -58,10 +51,10 @@ impl<T: Copy> Secured<T> {
     /// of `T` and call the closure `f` with a mutable reference.
     pub fn borrow_take<F, R>(&mut self, take: &mut T, f: F) -> R
     where
-        F: FnOnce(SecuredMut<T>) -> R,
+        F: FnOnce(SecureRef<&mut T>) -> R,
         T: Zeroize,
     {
-        let lock = SecuredLock::new(&mut self.0);
+        let lock = SecuredGuard::new(&mut self.0);
         lock.0.write(*take);
         take.zeroize();
         unsafe { lock.eval_inited(f) }
@@ -71,21 +64,21 @@ impl<T: Copy> Secured<T> {
     /// mutable reference to an uninitialized `T`.
     pub fn borrow_uninit<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(SecuredMut<MaybeUninit<T>>) -> R,
+        F: FnOnce(SecureRef<&mut MaybeUninit<T>>) -> R,
     {
-        let mut lock = SecuredLock::new(&mut self.0);
+        let mut lock = SecuredGuard::new(&mut self.0);
         lock.fill_bytes(UNINIT_ALLOC_BYTE);
-        f(SecuredMut::new(lock.0))
+        f(SecureRef::new_mut(lock.0))
     }
 
     /// Fill a `Secured` with the default value of `T` and return the result
     /// of calling the closure `f` with a mutable reference.
     pub fn default<F, R>(f: F) -> R
     where
-        F: FnOnce(SecuredMut<T>) -> R,
+        F: FnOnce(SecureRef<&mut T>) -> R,
         T: Default,
     {
-        let mut slf = Secured::new_uninit();
+        let mut slf = Secured::DEFAULT;
         slf.borrow_default(f)
     }
 
@@ -93,10 +86,10 @@ impl<T: Copy> Secured<T> {
     /// result of calling the closure `f` with a mutable reference.
     pub fn random<F, R>(rng: impl RngCore, f: F) -> R
     where
-        F: FnOnce(SecuredMut<T>) -> R,
+        F: FnOnce(SecureRef<&mut T>) -> R,
         T: FillBytes,
     {
-        let mut slf = Secured::new_uninit();
+        let mut slf = Secured::DEFAULT;
         slf.borrow_random(rng, f)
     }
 
@@ -105,10 +98,10 @@ impl<T: Copy> Secured<T> {
     /// closure `f` with a mutable reference.
     pub fn take<F, R>(take: &mut T, f: F) -> R
     where
-        F: FnOnce(SecuredMut<T>) -> R,
+        F: FnOnce(SecureRef<&mut T>) -> R,
         T: Zeroize,
     {
-        let mut slf = Secured::new_uninit();
+        let mut slf = Secured::DEFAULT;
         slf.borrow_take(take, f)
     }
 
@@ -116,9 +109,9 @@ impl<T: Copy> Secured<T> {
     /// `T`.
     pub fn uninit<F, R>(f: F) -> R
     where
-        F: FnOnce(SecuredMut<MaybeUninit<T>>) -> R,
+        F: FnOnce(SecureRef<&mut MaybeUninit<T>>) -> R,
     {
-        let mut slf = Secured::new_uninit();
+        let mut slf = Secured::DEFAULT;
         slf.borrow_uninit(f)
     }
 }
@@ -127,11 +120,11 @@ impl<const N: usize> Secured<[u8; N]> {
     /// For an existing `Secured` instance, call a closure with a mutable
     /// reference to an array of bytes. The values of the bytes are
     /// initialized to a standard indicator value.
-    pub fn borrow_uninit_bytes<F, R>(&mut self, f: F) -> R
+    pub fn borrow_bytes<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(SecuredMut<[u8; N]>) -> R,
+        F: FnOnce(SecureRef<&mut [u8; N]>) -> R,
     {
-        let mut lock = SecuredLock::new(&mut self.0);
+        let mut lock = SecuredGuard::new(&mut self.0);
         lock.fill_bytes(UNINIT_ALLOC_BYTE);
         unsafe { lock.eval_inited(f) }
     }
@@ -139,12 +132,12 @@ impl<const N: usize> Secured<[u8; N]> {
     /// Call the closure `f` with a mutable reference to an array of
     /// bytes. The values of the bytes are initialized to a standard
     /// indicator value.
-    pub fn uninit_bytes<F, R>(f: F) -> R
+    pub fn bytes<F, R>(f: F) -> R
     where
-        F: FnOnce(SecuredMut<[u8; N]>) -> R,
+        F: FnOnce(SecureRef<&mut [u8; N]>) -> R,
     {
-        let mut slf = Secured::new_uninit();
-        slf.borrow_uninit_bytes(f)
+        let mut slf = Secured::DEFAULT;
+        slf.borrow_bytes(f)
     }
 }
 
@@ -164,9 +157,9 @@ impl<T: Copy> Default for Secured<T> {
     }
 }
 
-struct SecuredLock<'a, T>(&'a mut MaybeUninit<T>);
+struct SecuredGuard<'a, T>(&'a mut MaybeUninit<T>);
 
-impl<'a, T> SecuredLock<'a, T> {
+impl<'a, T> SecuredGuard<'a, T> {
     pub fn new(data: &'a mut MaybeUninit<T>) -> Self {
         lock_pages(data.as_mut_ptr().cast(), size_of::<T>()).expect("Error locking stack memory");
         Self(data)
@@ -174,7 +167,7 @@ impl<'a, T> SecuredLock<'a, T> {
 
     #[inline]
     // SAFETY: `self.0` must be initialized prior to calling.
-    pub unsafe fn eval_inited<R>(self, f: impl FnOnce(SecuredMut<T>) -> R) -> R {
+    pub unsafe fn eval_inited<R>(self, f: impl FnOnce(SecureRef<&mut T>) -> R) -> R {
         struct Dropper<'d, D>(&'d mut D);
 
         impl<D> Drop for Dropper<'_, D> {
@@ -186,18 +179,18 @@ impl<'a, T> SecuredLock<'a, T> {
         }
 
         let drop = Dropper(self.0.assume_init_mut());
-        f(SecuredMut::new(drop.0))
+        f(SecureRef::new_mut(drop.0))
     }
 }
 
-unsafe impl<T> FillBytes for SecuredLock<'_, T> {
+unsafe impl<T> FillBytes for SecuredGuard<'_, T> {
     fn as_bytes_mut(&mut self) -> &mut [u8] {
         let len: usize = size_of_val(self.0);
         unsafe { slice::from_raw_parts_mut(self.0 as *mut MaybeUninit<T> as *mut u8, len) }
     }
 }
 
-impl<T> Drop for SecuredLock<'_, T> {
+impl<T> Drop for SecuredGuard<'_, T> {
     fn drop(&mut self) {
         self.0.zeroize();
         match unlock_pages(self.0.as_mut_ptr().cast(), size_of::<T>()) {
@@ -211,74 +204,75 @@ impl<T> Drop for SecuredLock<'_, T> {
     }
 }
 
-impl<T> Zeroize for SecuredLock<'_, T> {
+// implemented to support FillBytes
+impl<T> Zeroize for SecuredGuard<'_, T> {
     fn zeroize(&mut self) {
         self.0.zeroize();
     }
 }
 
-/// Temporary mutable access to a `Secured` value.
-pub struct SecuredMut<'m, T: ?Sized>(&'m mut T);
+// /// Temporary mutable access to a `Secured` value.
+// pub struct SecuredMut<'m, T: ?Sized>(&'m mut T);
 
-impl<'a, T: ?Sized> SecuredMut<'a, T> {
-    #[inline]
-    fn new(inner: &'a mut T) -> Self {
-        Self(inner)
-    }
-}
+// impl<'a, T: ?Sized> SecuredMut<'a, T> {
+//     #[inline]
+//     fn new(inner: &'a mut T) -> Self {
+//         Self(inner)
+//     }
+// }
 
-impl<'a, T: Copy> SecuredMut<'a, MaybeUninit<T>> {
-    /// Convert this reference into an initialized state.
-    /// # Safety
-    /// If the inner value is not properly initialized, then
-    /// undetermined behavior may result.
-    #[inline]
-    pub unsafe fn assume_init(self) -> SecuredMut<'a, T> {
-        SecuredMut(self.0.assume_init_mut())
-    }
+// impl<'a, T> SecuredMut<'a, MaybeUninit<T>> {
+//     /// Convert this reference into an initialized state.
+//     /// # Safety
+//     /// If the inner value is not properly initialized, then
+//     /// undetermined behavior may result.
+//     #[inline]
+//     pub unsafe fn assume_init(self) -> SecuredMut<'a, T> {
+//         SecuredMut(self.0.assume_init_mut())
+//     }
 
-    /// Write a value to the uninitialized reference and
-    /// safely initialize it.
-    #[inline(always)]
-    pub fn write(self, value: T) -> SecuredMut<'a, T> {
-        self.0.write(value);
-        SecuredMut(unsafe { self.0.assume_init_mut() })
-    }
-}
+//     /// Write a value to the uninitialized reference and
+//     /// safely initialize it.
+//     #[inline(always)]
+//     pub fn write(self, value: T) -> SecuredMut<'a, T> {
+//         self.0.write(value);
+//         SecuredMut(unsafe { self.0.assume_init_mut() })
+//     }
+// }
 
-impl<T: ?Sized> AsRef<T> for SecuredMut<'_, T> {
-    #[inline]
-    fn as_ref(&self) -> &T {
-        self.0
-    }
-}
+// impl<T: ?Sized> AsRef<T> for SecuredMut<'_, T> {
+//     #[inline]
+//     fn as_ref(&self) -> &T {
+//         self.0
+//     }
+// }
 
-impl<T: ?Sized> AsMut<T> for SecuredMut<'_, T> {
-    #[inline]
-    fn as_mut(&mut self) -> &mut T {
-        self.0
-    }
-}
+// impl<T: ?Sized> AsMut<T> for SecuredMut<'_, T> {
+//     #[inline]
+//     fn as_mut(&mut self) -> &mut T {
+//         self.0
+//     }
+// }
 
-impl<T: ?Sized> Deref for SecuredMut<'_, T> {
-    type Target = T;
+// impl<T: ?Sized> Deref for SecuredMut<'_, T> {
+//     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        self.0
-    }
-}
+//     fn deref(&self) -> &Self::Target {
+//         self.0
+//     }
+// }
 
-impl<T: ?Sized> DerefMut for SecuredMut<'_, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
-    }
-}
+// impl<T: ?Sized> DerefMut for SecuredMut<'_, T> {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         self.0
+//     }
+// }
 
-impl<T: ?Sized> fmt::Debug for SecuredMut<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("SecuredMut<{}>", type_name::<T>()))
-    }
-}
+// impl<T: ?Sized> fmt::Debug for SecuredMut<'_, T> {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         f.write_fmt(format_args!("SecuredMut<{}>", type_name::<T>()))
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -291,12 +285,14 @@ mod tests {
     #[test]
     fn secured_default() {
         let mut sec = Secured::<usize>::DEFAULT;
+        #[cfg_attr(miri, allow(unused))]
         let ptr = sec.borrow_default(|mut b| {
             assert_eq!(&*b, &0);
             *b = 99usize;
             &*b as *const usize
         });
         // ensure the value is zeroized after use
+        #[cfg(not(miri))]
         assert_eq!(unsafe { *ptr }, 0usize);
 
         Secured::<[u8; 10]>::default(|r| {
@@ -331,7 +327,7 @@ mod tests {
 
     #[test]
     fn secured_uninit() {
-        Secured::<[u8; 10]>::uninit_bytes(|r| {
+        Secured::<[u8; 10]>::bytes(|r| {
             assert_eq!(&*r, &[UNINIT_ALLOC_BYTE; 10]);
         });
         Secured::<u32>::uninit(|m| {
