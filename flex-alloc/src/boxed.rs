@@ -13,6 +13,7 @@ use core::{fmt, ptr};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::alloc::{AllocateIn, Allocator, AllocatorDefault, Global};
+use crate::vec::config::VecConfigAlloc;
 use crate::vec::{insert::Inserter, Vec};
 use crate::StorageError;
 
@@ -563,6 +564,23 @@ impl<T, A: Allocator> Box<[MaybeUninit<T>], A> {
     }
 }
 
+impl<T, A: Allocator, const N: usize> Box<[T; N], A> {
+    /// Converts a `Box<T, A>` into a `Box<[T], A>`.
+    ///
+    /// This conversion does not allocate on the heap and happens in place.
+    pub fn into_boxed_slice(boxed: Self) -> Box<[T], A> {
+        let (ptr, alloc) = boxed.into_handle().into_parts();
+        Box {
+            handle: RawBox {
+                ptr: unsafe {
+                    NonNull::new_unchecked(ptr::slice_from_raw_parts_mut(ptr.as_ptr().cast(), N))
+                },
+                alloc,
+            },
+        }
+    }
+}
+
 impl<T: ?Sized, A: Allocator> AsRef<T> for Box<T, A> {
     fn as_ref(&self) -> &T {
         self.handle.as_ref()
@@ -653,16 +671,10 @@ impl<T: ?Sized, A: Allocator> Drop for Box<T, A> {
     }
 }
 
-impl<T: Clone, A: AllocatorDefault> From<T> for Box<T, A> {
+impl<T, A: AllocatorDefault> From<T> for Box<T, A> {
     #[inline]
     fn from(value: T) -> Self {
         Box::write(Self::new_uninit(), value)
-    }
-}
-
-impl<T: Clone, A: AllocatorDefault> From<&T> for Box<T, A> {
-    fn from(value: &T) -> Self {
-        Box::write(Self::new_uninit(), value.clone())
     }
 }
 
@@ -672,9 +684,9 @@ impl<T: Clone, A: AllocatorDefault> From<&[T]> for Box<[T], A> {
     }
 }
 
-impl<T: Clone, A: AllocatorDefault, const N: usize> From<[T; N]> for Box<[T], A> {
+impl<T, A: AllocatorDefault, const N: usize> From<[T; N]> for Box<[T], A> {
     fn from(data: [T; N]) -> Self {
-        Self::from_slice(&data)
+        Box::into_boxed_slice(Box::new(data))
     }
 }
 
@@ -685,8 +697,11 @@ impl<A: AllocatorDefault> From<&str> for Box<str, A> {
     }
 }
 
-impl<T, A: Allocator> From<Vec<T, A>> for Box<[T], A> {
-    fn from(vec: Vec<T, A>) -> Self {
+impl<T, C> From<Vec<T, C>> for Box<[T], C::Alloc>
+where
+    C: VecConfigAlloc<T>,
+{
+    fn from(vec: Vec<T, C>) -> Self {
         vec.into_boxed_slice()
     }
 }
