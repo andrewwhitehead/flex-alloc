@@ -24,19 +24,23 @@ use crate::vec::SecureVec;
 
 const ASSOC_DATA_SIZE: usize = 16384;
 
-/// A [`Box`] which is backed by a secured allocator and keeps its
-/// contents in physical memory. When released, the allocated memory
-/// is securely zeroed.
+/// A [`flex-alloc Box`](flex_alloc::boxed::Box) which is backed by a
+/// secured allocator and keeps its contents in physical memory. When
+/// released, the allocated memory is securely zeroed.
 ///
 /// This container should be converted into a
 /// [`ProtectedBox`] or [`ShieldedBox`] to protect secret data.
 ///
 /// This type does NOT protect against accidental output of
-/// contained values using the `Debug` trait.
+/// contained values using the [`Debug`] trait.
+///
+/// When possible, prefer initialization of the protected container
+/// using the [`ProtectedInit`](`crate::ProtectedInit`) or
+/// [`ProtectedInitSlice`](`crate::ProtectedInitSlice`) traits.
 pub type SecureBox<T> = Box<T, SecureAlloc>;
 
-/// A (`Box`)[flex_alloc::boxed::Box] container type which applies additional
-/// protections around the allocated memory.
+/// A [`flex-alloc Box`](flex_alloc::boxed::Box) container type which applies
+/// additional protections around the allocated memory.
 ///
 /// - The memory is allocated using [`SecureAlloc`] and flagged to remain
 ///   resident in physical memory.
@@ -153,8 +157,8 @@ unsafe impl<T: Sync + ?Sized> Sync for ProtectedBox<T> {}
 
 impl<T: ?Sized> ZeroizeOnDrop for ProtectedBox<T> {}
 
-/// A (`Box`)[flex_alloc::boxed::Box] container type which applies additional
-/// protections around the allocated memory.
+/// A [`flex-alloc Box`](flex_alloc::boxed::Box) container type which applies
+/// additional protections around the allocated memory.
 ///
 /// - The memory is allocated using [`SecureAlloc`] and flagged to remain
 ///   resident in physical memory.
@@ -181,7 +185,7 @@ impl<T: Default> Default for ShieldedBox<T> {
 
 impl<T: ?Sized> fmt::Debug for ShieldedBox<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("ProtectedBox<{}>", type_name::<T>()))
+        f.write_fmt(format_args!("ShieldedBox<{}>", type_name::<T>()))
     }
 }
 

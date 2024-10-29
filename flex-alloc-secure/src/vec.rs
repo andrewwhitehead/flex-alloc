@@ -9,8 +9,13 @@ use flex_alloc::vec::Vec;
 /// resizing the vector.
 ///
 /// This container should be converted into a
-/// [`ProtectedBox`] or [`ShieldedBox`] to protect secret data.
+/// [`ProtectedBox`](crate::boxed::ProtectedBox) or
+/// [`ShieldedBox`](crate::boxed::ShieldedBox) to protect secret data.
 ///
 /// This type does NOT protect against accidental output of
-/// contained values using the `Debug` trait.
+/// contained values using the [`Debug`] trait.
+///
+/// When possible, prefer initialization of the protected container
+/// using the [`ProtectedInit`](`crate::ProtectedInit`) or
+/// [`ProtectedInitSlice`](`crate::ProtectedInitSlice`) traits.
 pub type SecureVec<T> = Vec<T, SecureAlloc>;
