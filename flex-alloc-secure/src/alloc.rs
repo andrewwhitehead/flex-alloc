@@ -383,7 +383,10 @@ mod tests {
     fn check_uninit() {
         let layout = Layout::new::<usize>();
         let buf = SecureAlloc.allocate(layout).expect("allocation error");
-        assert!(!buf.is_empty() && unsafe { buf.as_ref() }[..4] == [UNINIT_ALLOC_BYTE; 4]);
+        #[allow(clippy::len_zero)]
+        {
+            assert!(buf.len() != 0 && unsafe { buf.as_ref() }[..4] == [UNINIT_ALLOC_BYTE; 4]);
+        }
         unsafe { SecureAlloc.deallocate(buf.cast(), layout) };
     }
 }
