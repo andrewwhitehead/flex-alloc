@@ -1,4 +1,5 @@
-use core::{fmt, mem::MaybeUninit};
+use core::fmt;
+use core::mem::MaybeUninit;
 
 use const_default::ConstDefault;
 
