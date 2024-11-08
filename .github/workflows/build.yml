@@ -44,17 +44,26 @@ jobs:
         run: cargo check --no-default-features
 
       - name: Cargo check (allocator-api2)
-        run: cargo check --no-default-features --features allocator-api2
+        run: cargo check --package flex-alloc --no-default-features --features allocator-api2
 
-      - name: Cargo test
-        run: cargo test --features zeroize
+      - name: Cargo test (alloc)
+        run: cargo test --package flex-alloc --no-default-features --features alloc
+
+      - name: Cargo test (std)
+        run: cargo test --package flex-alloc --features std
+
+      - name: Cargo test (zeroize)
+        run: cargo test --package flex-alloc --no-default-features --features zeroize
 
       - name: Cargo test (no default features)
-        run: cargo test --no-default-features
+        run: cargo test --package flex-alloc --no-default-features
+
+      - name: Cargo test (flex-alloc-secure)
+        run: cargo test --package flex-alloc-secure
 
       - name: Cargo format
         run: cargo fmt --all -- --check
 
       - name: Cargo clippy
         # run: cargo clippy --features zeroize -- -Dwarnings
-        run: cargo clippy --features zeroize
+        run: cargo clippy
