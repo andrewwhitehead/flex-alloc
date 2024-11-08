@@ -3,7 +3,7 @@
 use core::any::type_name;
 use core::cell::UnsafeCell;
 use core::fmt;
-use core::mem::{size_of_val, ManuallyDrop};
+use core::mem::ManuallyDrop;
 use core::ptr::{addr_of, addr_of_mut};
 use core::slice;
 use core::sync::atomic;

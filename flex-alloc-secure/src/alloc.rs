@@ -1,7 +1,7 @@
 //! Support for virtual memory management, including memory protections.
 
 use core::alloc::Layout;
-use core::mem::{self, transmute};
+use core::mem::transmute;
 use core::ptr::{self, NonNull};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{fmt, slice};
@@ -91,7 +91,7 @@ pub fn default_page_size() -> usize {
 
         debug_assert_ne!(size, 0);
         // inputs to posix_memalign must be a multiple of the pointer size
-        debug_assert_eq!(size % mem::size_of::<*const ()>(), 0);
+        debug_assert_eq!(size % size_of::<*const ()>(), 0);
 
         CACHE.store(size, Ordering::Relaxed);
     }

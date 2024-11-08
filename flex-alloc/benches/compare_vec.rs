@@ -1,8 +1,6 @@
 #[macro_use]
 extern crate criterion;
 
-use core::mem::size_of;
-
 use criterion::{black_box, Criterion};
 
 use flex_alloc::{

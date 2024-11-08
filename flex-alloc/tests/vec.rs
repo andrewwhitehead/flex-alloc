@@ -2,8 +2,6 @@
 
 use core::marker::PhantomData as Cfg;
 use core::mem::ManuallyDrop;
-#[cfg(feature = "alloc")]
-use core::mem::{size_of, size_of_val};
 
 use rstest::rstest;
 

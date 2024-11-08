@@ -1,4 +1,4 @@
-use core::mem::{size_of_val, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::slice;
 
 use flex_alloc::alloc::Allocator;

@@ -13,7 +13,7 @@ env:
   RUST_BACKTRACE: full
   RUST_LOG: debug
   RUST_LOG_STYLE: always
-  RUST_VERSION: stable 6 months ago
+  RUST_VERSION: stable 3 months ago
 
 defaults:
   run:

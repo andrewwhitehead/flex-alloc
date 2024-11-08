@@ -2,7 +2,7 @@
 
 use core::alloc::Layout;
 use core::fmt::Debug;
-use core::mem::{size_of, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::ptr::NonNull;
 use core::slice;
 

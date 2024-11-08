@@ -213,11 +213,8 @@ impl<T, H: BufferHeader<T>> ThinPtr<T, H> {
                 ptr.len() >= Self::DATA_OFFSET,
                 "allocation too small for thin ptr"
             );
-            // SAFETY: the allocation must be at least `DATA_OFFSET` in size.
-            // The pointer is guaranteed to be non-null.
-            // FIXME: use `NonNull::add` when stable.
-            let head =
-                unsafe { NonNull::new_unchecked((ptr.as_ptr() as *mut u8).add(Self::DATA_OFFSET)) };
+            // SAFETY: the allocation is at least `DATA_OFFSET` in size.
+            let head = unsafe { ptr.cast::<u8>().add(Self::DATA_OFFSET) };
             let data_alloc = NonNull::slice_from_raw_parts(head, ptr.len() - Self::DATA_OFFSET);
             let data = header.update_for_alloc(data_alloc, exact);
             unsafe { ptr.cast::<H>().as_ptr().write(header) };

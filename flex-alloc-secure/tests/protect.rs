@@ -1,5 +1,3 @@
-use core::mem::size_of;
-
 use flex_alloc_secure::{
     alloc::UNINIT_ALLOC_BYTE,
     boxed::{ProtectedBox, ShieldedBox},

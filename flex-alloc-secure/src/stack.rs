@@ -2,7 +2,7 @@
 
 use core::any::type_name;
 use core::fmt;
-use core::mem::{size_of, size_of_val, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::ptr;
 use core::slice;
 
