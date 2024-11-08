@@ -1,15 +1,13 @@
 //! Error handling.
 
-use core::alloc::LayoutError;
+use core::alloc::{Layout, LayoutError};
 use core::fmt;
-
-use crate::alloc::AllocError;
 
 /// An enumeration of error types raised by storage implementations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
     /// A memory allocation failed.
-    AllocError,
+    AllocError(Layout),
     /// The limit of the current allocation was reached.
     CapacityLimit,
     /// The provided layout was not allocatable.
@@ -24,7 +22,7 @@ impl StorageError {
     /// Generic description of this error.
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::AllocError => "Allocation error",
+            Self::AllocError(_) => "Allocation error",
             Self::CapacityLimit => "Exceeded storage capacity limit",
             Self::LayoutError(_) => "Layout error",
             Self::ProtectionError => "Memory protection failed",
@@ -36,19 +34,17 @@ impl StorageError {
     #[cold]
     #[inline(never)]
     pub fn panic(self) -> ! {
-        panic!("{}", self.as_str());
+        if let Self::AllocError(layout) = self {
+            crate::alloc::handle_alloc_error(layout);
+        } else {
+            panic!("{}", self.as_str())
+        }
     }
 }
 
 impl fmt::Display for StorageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
-    }
-}
-
-impl From<AllocError> for StorageError {
-    fn from(_err: AllocError) -> Self {
-        Self::AllocError
     }
 }
 
@@ -115,3 +111,27 @@ impl<T> fmt::Display for UpdateError<T> {
 
 #[cfg(feature = "std")]
 impl<T> std::error::Error for UpdateError<T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::StorageError;
+    use core::alloc::Layout;
+
+    #[test]
+    #[should_panic(expected = "memory allocation of 8 bytes failed")]
+    fn alloc_error_panic() {
+        // When testing, crate::alloc::handle_alloc_error is replaced with an
+        // explicit panic. This is because #[should_panic] does not currently
+        // capture the panic that is started in the standard out-of-memory handler.
+        let a = StorageError::AllocError(Layout::new::<usize>());
+        a.panic();
+    }
+
+    #[test]
+    #[should_panic(expected = "Layout error")]
+    fn layout_error_panic() {
+        let err = Layout::from_size_align(0, 3).expect_err("expected layout error");
+        let a = StorageError::LayoutError(err);
+        a.panic();
+    }
+}

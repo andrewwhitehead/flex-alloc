@@ -4,8 +4,10 @@ use const_default::ConstDefault;
 
 mod alloc;
 mod array;
+pub(crate) mod boxed;
 mod bytes;
 mod inline;
+pub(crate) mod insert;
 mod spill;
 pub(crate) mod utils;
 

@@ -18,7 +18,7 @@
 //! - Custom index types and growth behavior to manage memory usage.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
+#![cfg_attr(feature = "nightly", feature(allocator_api, coerce_unsized, unsize))]
 #![warn(missing_docs)]
 
 #[doc = include_str!("../../README.md")]

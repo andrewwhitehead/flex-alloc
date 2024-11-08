@@ -44,7 +44,9 @@ impl<T, H: BufferHeader<T>, A: Allocator> FatBuffer<T, H, A> {
         I: AllocateIn<Alloc = A>,
     {
         let layout = header.layout()?;
-        let (ptr, alloc) = alloc_in.allocate_in(layout)?;
+        let (ptr, alloc) = alloc_in
+            .allocate_in(layout)
+            .map_err(|_| StorageError::AllocError(layout))?;
         let mut header = H::EMPTY;
         let data = header.update_for_alloc(ptr, exact);
         Ok(Self {
@@ -58,10 +60,16 @@ impl<T, H: BufferHeader<T>, A: Allocator> FatBuffer<T, H, A> {
     pub(crate) fn grow(&mut self, mut new_header: H, exact: bool) -> Result<(), StorageError> {
         let new_layout = new_header.layout()?;
         let ptr = if self.is_dangling() {
-            self.alloc.allocate(new_layout)?
+            self.alloc
+                .allocate(new_layout)
+                .map_err(|_| StorageError::AllocError(new_layout))?
         } else {
             let old_layout: Layout = self.header.layout()?;
-            unsafe { self.alloc.grow(self.data.cast(), old_layout, new_layout) }?
+            // SAFETY: the allocated pointer is guaranteed to be from this
+            // allocator with the provided layout, or a larger layout with
+            // the same alignment.
+            unsafe { self.alloc.grow(self.data.cast(), old_layout, new_layout) }
+                .map_err(|_| StorageError::AllocError(new_layout))?
         };
         self.data = new_header.update_for_alloc(ptr, exact);
         self.header = new_header;
@@ -73,16 +81,25 @@ impl<T, H: BufferHeader<T>, A: Allocator> FatBuffer<T, H, A> {
         if new_header.is_empty() {
             if !self.is_dangling() {
                 let layout = self.header.layout()?;
+                // SAFETY: the allocated pointer is guaranteed to be from this
+                // allocator with the provided layout, or a larger layout with
+                // the same alignment.
                 unsafe { self.alloc.deallocate(self.data.cast(), layout) };
                 self.data = NonNull::dangling();
             }
         } else {
             let new_layout = new_header.layout()?;
             let ptr = if self.is_dangling() {
-                self.alloc.allocate(new_layout)?
+                self.alloc
+                    .allocate(new_layout)
+                    .map_err(|_| StorageError::AllocError(new_layout))?
             } else {
                 let old_layout: Layout = self.header.layout()?;
-                unsafe { self.alloc.shrink(self.data.cast(), old_layout, new_layout) }?
+                // SAFETY: the allocated pointer is guaranteed to be from this
+                // allocator with the provided layout, or a larger layout with
+                // the same alignment.
+                unsafe { self.alloc.shrink(self.data.cast(), old_layout, new_layout) }
+                    .map_err(|_| StorageError::AllocError(new_layout))?
             };
             self.data = new_header.update_for_alloc(ptr, true);
         }
@@ -166,7 +183,15 @@ impl<T: ?Sized, H: BufferHeader<T>, A: AllocatorZeroizes> zeroize::ZeroizeOnDrop
 pub(crate) struct ThinPtr<T, H: BufferHeader<T>>(NonNull<T>, PhantomData<H>);
 
 impl<T, H: BufferHeader<T>> ThinPtr<T, H> {
-    const DATA_OFFSET: usize = data_offset::<H, T>();
+    const DATA_OFFSET: usize = {
+        // Calculate the byte offset of Data when following Header. This should
+        // be equivalent to offset_of!((Meta::Header, Meta::Data), 1),
+        // although repr(C) would need to be used to guarantee consistency.
+        // See `Layout::padding_needed_for` (currently unstable) for reference.
+        let header = Layout::new::<H>();
+        let data_align = align_of::<T>();
+        header.size().wrapping_add(data_align).wrapping_sub(1) & !data_align.wrapping_sub(1)
+    };
 
     #[inline]
     pub const fn dangling() -> Self {
@@ -184,12 +209,16 @@ impl<T, H: BufferHeader<T>> ThinPtr<T, H> {
         if ptr.len() == 0 {
             Self::dangling()
         } else {
-            let data_alloc = unsafe {
-                NonNull::new_unchecked(ptr::slice_from_raw_parts_mut(
-                    (ptr.as_ptr() as *mut u8).add(Self::DATA_OFFSET),
-                    ptr.len() - Self::DATA_OFFSET,
-                ))
-            };
+            assert!(
+                ptr.len() >= Self::DATA_OFFSET,
+                "allocation too small for thin ptr"
+            );
+            // SAFETY: the allocation must be at least `DATA_OFFSET` in size.
+            // The pointer is guaranteed to be non-null.
+            // FIXME: use `NonNull::add` when stable.
+            let head =
+                unsafe { NonNull::new_unchecked((ptr.as_ptr() as *mut u8).add(Self::DATA_OFFSET)) };
+            let data_alloc = NonNull::slice_from_raw_parts(head, ptr.len() - Self::DATA_OFFSET);
             let data = header.update_for_alloc(data_alloc, exact);
             unsafe { ptr.cast::<H>().as_ptr().write(header) };
             Self(data, PhantomData)
@@ -209,9 +238,11 @@ impl<T, H: BufferHeader<T>> ThinPtr<T, H> {
         }
     }
 
+    /// # Safety
+    /// The pointer must be established to be non-dangling.
     #[inline]
-    pub const fn to_alloc(&self) -> NonNull<u8> {
-        unsafe { NonNull::new_unchecked(self.header_ptr()) }.cast()
+    pub const unsafe fn to_alloc(&self) -> NonNull<u8> {
+        NonNull::new_unchecked(self.header_ptr()).cast()
     }
 
     #[inline]
@@ -245,7 +276,9 @@ impl<T, H: BufferHeader<T>, A: Allocator> ThinBuffer<T, H, A> {
         I: AllocateIn<Alloc = A>,
     {
         let layout = ThinPtr::layout(&header)?;
-        let (ptr, alloc) = alloc_in.allocate_in(layout)?;
+        let (ptr, alloc) = alloc_in
+            .allocate_in(layout)
+            .map_err(|_| StorageError::AllocError(layout))?;
         let data = ThinPtr::from_alloc(header, ptr, exact);
         Ok(Self { data, alloc })
     }
@@ -256,13 +289,16 @@ impl<T, H: BufferHeader<T>, A: Allocator> ThinBuffer<T, H, A> {
         let new_layout = ThinPtr::layout(&new_header)?;
         assert!(new_layout.size() != 0, "Cannot grow to empty buffer");
         let ptr = if old_header.is_empty() {
-            self.alloc.allocate(new_layout)?
+            self.alloc
+                .allocate(new_layout)
+                .map_err(|_| StorageError::AllocError(new_layout))?
         } else {
             let old_layout: Layout = ThinPtr::<T, H>::layout(&old_header)?;
             unsafe {
                 self.alloc
                     .grow(self.data.to_alloc(), old_layout, new_layout)
-            }?
+            }
+            .map_err(|_| StorageError::AllocError(new_layout))?
         };
         self.data = ThinPtr::from_alloc(new_header, ptr, exact);
         Ok(())
@@ -287,9 +323,12 @@ impl<T, H: BufferHeader<T>, A: Allocator> ThinBuffer<T, H, A> {
                 unsafe {
                     self.alloc
                         .shrink(self.data.to_alloc(), old_layout, new_layout)
-                }?
+                }
+                .map_err(|_| StorageError::AllocError(new_layout))?
             } else {
-                self.alloc.allocate(new_layout)?
+                self.alloc
+                    .allocate(new_layout)
+                    .map_err(|_| StorageError::AllocError(new_layout))?
             };
             self.data = ThinPtr::from_alloc(new_header, ptr, true);
         }
@@ -378,19 +417,10 @@ impl<T, H: BufferHeader<T>, A: Allocator> Drop for ThinBuffer<T, H, A> {
         let header = self.header();
         if !header.is_empty() {
             let layout = ThinPtr::<T, H>::layout(&header).expect("Layout error");
-            unsafe {
-                self.alloc.deallocate(self.data.to_alloc(), layout);
-            }
+            // SAFETY: the allocated pointer is guaranteed to be from this
+            // allocator with the provided layout, or a larger layout with
+            // the same alignment.
+            unsafe { self.alloc.deallocate(self.data.to_alloc(), layout) };
         }
     }
-}
-
-/// Calculate the byte offset of Data when following Header. This should
-/// be equivalent to offset_of!((Meta::Header, Meta::Data), 1)
-/// although repr(C) would need to be used to guarantee consistency.
-/// See `Layout::padding_needed_for` (currently unstable) for reference.
-const fn data_offset<Header, Data>() -> usize {
-    let header = Layout::new::<Header>();
-    let data_align = align_of::<Data>();
-    header.size().wrapping_add(data_align).wrapping_sub(1) & !data_align.wrapping_sub(1)
 }

@@ -387,7 +387,7 @@ impl<'a, T, const N: usize> VecNewIn<T> for &'a mut ArrayStorage<T, N> {
                 capacity,
                 length: Index::ZERO,
             },
-            unsafe { NonNull::new_unchecked(self.0.as_mut_ptr()) }.cast(),
+            NonNull::from(&mut self.0).cast(),
             Fixed::default(),
         ))
     }
@@ -414,14 +414,14 @@ impl<'a, T, A: Allocator> VecNewIn<T> for SpillStorage<'a, &'a mut [MaybeUninit<
         if !exact {
             capacity = self.buffer.len();
         }
-        let ptr = self.buffer.as_mut_ptr();
+        let data = NonNull::from(self.buffer).cast::<T>();
         Ok(FatBuffer::from_parts(
             VecHeader {
                 capacity,
                 length: Index::ZERO,
             },
-            unsafe { NonNull::new_unchecked(ptr) }.cast(),
-            Spill::new(self.alloc, ptr.cast(), Fixed::DEFAULT),
+            data,
+            Spill::new(self.alloc, data.as_ptr().cast::<u8>(), Fixed::DEFAULT),
         ))
     }
 }

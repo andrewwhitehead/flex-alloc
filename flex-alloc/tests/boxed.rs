@@ -1,13 +1,14 @@
 #![cfg_attr(feature = "nightly", feature(allocator_api))]
 
-use core::marker::PhantomData as Cfg;
 #[cfg(feature = "alloc")]
+use core::marker::PhantomData as Cfg;
+
 use rstest::rstest;
 
 #[cfg(feature = "alloc")]
-use flex_alloc::alloc::{Global, SpillAlloc};
+use flex_alloc::alloc::{AllocatorDefault, Global, SpillAlloc};
 use flex_alloc::{
-    alloc::{AllocateIn, AllocatorDefault},
+    alloc::AllocateIn,
     boxed::Box as FlexBox,
     storage::{aligned_byte_storage, byte_storage},
 };
@@ -55,8 +56,8 @@ fn box_empty_slice_in<A: AllocateIn>(#[case] buf: A) {
 #[case::aligned(&mut aligned_byte_storage::<usize, 1000>())]
 #[case::bytes(&mut byte_storage::<1000>())]
 fn box_from_slice_in<A: AllocateIn>(#[case] buf: A) {
-    let boxed = FlexBox::from_slice_in(&[1, 3, 5], buf);
-    assert_eq!(boxed.as_ref(), &[1, 3, 5]);
+    let boxed = FlexBox::from_slice_in(SLICE, buf);
+    assert_eq!(boxed.as_ref(), SLICE);
 }
 
 #[rstest]

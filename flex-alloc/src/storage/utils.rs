@@ -15,10 +15,9 @@ pub fn layout_aligned_bytes(
     if max_cap < layout.size() || offset > buf.len() {
         Err(StorageError::CapacityLimit)
     } else {
-        Ok(NonNull::slice_from_raw_parts(
-            unsafe { NonNull::new_unchecked((start as *mut u8).add(offset)) },
-            max_cap,
-        ))
+        // FIXME use `NonNull::add` when stabilized. The pointer is guaranteed to be
+        let head = unsafe { NonNull::new_unchecked((start as *mut u8).add(offset)) };
+        Ok(NonNull::slice_from_raw_parts(head, max_cap))
     }
 }
 

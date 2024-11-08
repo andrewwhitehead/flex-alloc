@@ -18,6 +18,7 @@ pub union ByteStorage<T, const N: usize> {
 impl<T, const N: usize> ByteStorage<T, N> {
     /// Access the buffer contents as a mutable slice.
     pub fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<u8>] {
+        // SAFETY: `self.data` is always safe to access.
         unsafe { &mut self.data }
     }
 }
@@ -35,6 +36,7 @@ impl<'a, T, const N: usize> AllocateIn for &'a mut ByteStorage<T, N> {
 
 impl<T, const N: usize> ConstDefault for ByteStorage<T, N> {
     const DEFAULT: Self = Self {
+        // SAFETY: this is the accepted method to construct a `MaybeUninit` slice.
         data: unsafe { MaybeUninit::uninit().assume_init() },
     };
 }

@@ -115,6 +115,7 @@
 //! standard library behavior.
 //!
 //! ```
+//! # #![cfg_attr(feature = "nightly", feature(allocator_api))]
 //! # #[cfg(feature = "alloc")] {
 //! use flex_alloc::{
 //!     alloc::Global,
@@ -144,11 +145,10 @@ use crate::alloc::{AllocatorDefault, Global};
 use crate::boxed::Box;
 use crate::capacity::{Grow, Index};
 use crate::error::{StorageError, UpdateError};
-use crate::storage::{Inline, RawBuffer};
+use crate::storage::{insert::Inserter, Inline, RawBuffer};
 
 use self::buffer::VecBuffer;
 use self::config::{VecConfig, VecConfigAlloc, VecConfigNew, VecConfigSpawn, VecNewIn};
-use self::insert::Inserter;
 
 #[cfg(feature = "alloc")]
 use crate::alloc::ConvertAlloc;
@@ -163,7 +163,6 @@ mod macros;
 
 mod cow;
 mod drain;
-pub(crate) mod insert;
 mod into_iter;
 mod splice;
 
@@ -832,19 +831,18 @@ impl<T, C: VecConfig> Vec<T, C> {
         R: RangeBounds<C::Index>,
         T: Clone,
     {
+        let prev_len = self.len();
         let range = bounds_to_range(range, self.buffer.length());
         match self._try_reserve(range.len(), false) {
             Ok(_) => (),
             Err(error) => error.panic(),
         }
-        let (head, mut insert) = Inserter::split_buffer(&mut self.buffer);
-        for item in &head[range] {
-            insert.push_clone(item);
-        }
-        let (added, _) = insert.complete();
+        let (head, spare) = self.split_at_spare_mut();
+        let mut insert = Inserter::new(spare);
+        insert.push_slice(&head[range]);
+        let added = insert.complete();
         if added > 0 {
-            let new_len = head.len() + added;
-            unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
+            unsafe { self.buffer.set_length(prev_len.saturating_add(added)) };
         }
     }
 
@@ -857,16 +855,15 @@ impl<T, C: VecConfig> Vec<T, C> {
         R: RangeBounds<C::Index>,
         T: Clone,
     {
+        let prev_len = self.len();
         let range = bounds_to_range(range, self.buffer.length());
         self._try_reserve(range.len(), false)?;
-        let (head, mut insert) = Inserter::split_buffer(&mut self.buffer);
-        for item in head[range].iter() {
-            insert.push_clone(item);
-        }
-        let (added, _) = insert.complete();
+        let (head, spare) = self.split_at_spare_mut();
+        let mut insert = Inserter::new(spare);
+        insert.push_slice(&head[range]);
+        let added = insert.complete();
         if added > 0 {
-            let new_len: usize = head.len() + added;
-            unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
+            unsafe { self.buffer.set_length(prev_len.saturating_add(added)) };
         }
         Ok(())
     }
@@ -875,33 +872,28 @@ impl<T, C: VecConfig> Vec<T, C> {
     where
         T: Clone,
     {
-        let mut insert = Inserter::for_buffer(&mut self.buffer);
+        let prev_len = self.len();
+        let mut insert = Inserter::new(self.spare_capacity_mut());
         for item in items.iter() {
-            insert.push_clone(item);
+            insert.push_unchecked(item.clone());
         }
-        let (added, new_len) = insert.complete();
+        let added = insert.complete();
         if added > 0 {
-            unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
+            unsafe { self.buffer.set_length(prev_len.saturating_add(added)) };
         }
     }
 
     fn try_extend(&mut self, iter: &mut impl Iterator<Item = T>) -> Result<(), UpdateError<T>> {
         loop {
-            let mut insert = Inserter::for_buffer(&mut self.buffer);
-            let mut full;
-            loop {
-                full = insert.full();
-                if full {
-                    break;
-                }
-                let Some(item) = iter.next() else { break };
-                insert.push(item);
+            let prev_len = self.buffer.length();
+            let mut insert = Inserter::new(self.spare_capacity_mut());
+            insert.push_iter(iter);
+            let ins_count = insert.complete();
+            let new_len = prev_len.saturating_add(ins_count);
+            if ins_count > 0 {
+                unsafe { self.buffer.set_length(new_len) };
             }
-            let (added, new_len) = insert.complete();
-            if added > 0 {
-                unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
-            }
-            if !full {
+            if new_len < self.buffer.capacity() {
                 // ran out of items to insert
                 break;
             }
@@ -909,8 +901,8 @@ impl<T, C: VecConfig> Vec<T, C> {
                 let min_reserve = iter.size_hint().0.saturating_add(1);
                 match self._try_reserve(min_reserve, false) {
                     Ok(_) => {
-                        unsafe { self.buffer.uninit_index(new_len) }.write(item);
-                        unsafe { self.buffer.set_length(C::Index::from_usize(new_len + 1)) };
+                        unsafe { self.buffer.uninit_index(new_len.to_usize()) }.write(item);
+                        unsafe { self.buffer.set_length(new_len.saturating_add(1)) };
                     }
                     Err(err) => return Err(UpdateError::new(err, item)),
                 }
@@ -1010,15 +1002,23 @@ impl<T, C: VecConfig> Vec<T, C> {
         let tail_count = prev_len - index;
         let head = unsafe { self.buffer.data_ptr_mut().add(index) };
         if tail_count > 0 {
+            // Temporarily disavow all entries after `index` as they may be uninitialized.
+            // SAFETY: the capacity of the buffer has been established as > 0 by `try_reserve`.
+            unsafe {
+                self.buffer.set_length(C::Index::from_usize(index));
+            }
+            // Shift tail entries by the number of items to be inserted.
+            // SAFETY: the buffer has been established to contain at least `ins_count`
+            // additional capacity by `try_reserve`.
             unsafe { ptr::copy(head, head.add(index + ins_count), tail_count) };
         }
-        let mut insert =
-            Inserter::for_buffer_with_range(&mut self.buffer, index, ins_count, tail_count);
-        for item in other {
-            insert.push_clone(item);
-        }
+        let mut insert = Inserter::new_with_tail(
+            &mut self.buffer.as_uninit_slice()[index..index + ins_count + tail_count],
+            tail_count,
+        );
+        insert.push_slice(other);
         insert.complete();
-        // SAFETY: capacity of the buffer has been established as > 0 by try_reserve
+        // SAFETY: capacity of the buffer has been established as > 0 by `try_reserve`.
         unsafe {
             self.buffer
                 .set_length(C::Index::from_usize(prev_len + ins_count));
@@ -1165,10 +1165,8 @@ impl<T, C: VecConfig> Vec<T, C> {
             Ordering::Greater => {
                 let ins_count = new_len.to_usize() - len.to_usize();
                 self._try_reserve(ins_count, false)?;
-                let mut insert = Inserter::for_buffer(&mut self.buffer);
-                for _ in 0..ins_count {
-                    insert.push_clone(&value);
-                }
+                let mut insert = Inserter::new(self.spare_capacity_mut());
+                insert.push_repeat(&value, ins_count);
                 insert.complete();
                 // SAFETY: capacity of the buffer has been established as > 0 by _try_reserve
                 unsafe { self.buffer.set_length(new_len) }
@@ -1226,7 +1224,7 @@ impl<T, C: VecConfig> Vec<T, C> {
             Ordering::Greater => {
                 let ins_count = new_len.to_usize() - len.to_usize();
                 self._try_reserve(ins_count, false)?;
-                let mut insert = Inserter::for_buffer(&mut self.buffer);
+                let mut insert = Inserter::new(self.spare_capacity_mut());
                 for _ in 0..ins_count {
                     insert.push(f());
                 }
@@ -1628,23 +1626,45 @@ unsafe impl<T: Send, C: VecConfig + Send> Send for Vec<T, C> {}
 unsafe impl<T: Sync, C: VecConfig + Sync> Sync for Vec<T, C> {}
 
 #[cfg(all(feature = "alloc", not(feature = "nightly")))]
-impl<T> From<alloc_crate::boxed::Box<[T]>> for Vec<T, Global> {
+impl<T, C> ConvertAlloc<alloc_crate::boxed::Box<[T]>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Alloc = Global>,
+{
     #[inline]
-    fn from(vec: alloc_crate::boxed::Box<[T]>) -> Self {
-        alloc_crate::vec::Vec::<T>::from(vec).into()
-    }
-}
-
-#[cfg(all(feature = "alloc", feature = "nightly"))]
-impl<T, A: crate::alloc::Allocator> From<alloc_crate::boxed::Box<[T], A>> for Vec<T, A> {
-    #[inline]
-    fn from(vec: alloc_crate::boxed::Box<[T], A>) -> Self {
-        alloc_crate::vec::Vec::<T, A>::from(vec).into()
+    fn convert(self) -> alloc_crate::boxed::Box<[T]> {
+        self.into_boxed_slice().convert()
     }
 }
 
 #[cfg(all(feature = "alloc", not(feature = "nightly")))]
-impl<T> ConvertAlloc<alloc_crate::vec::Vec<T>> for Vec<T, Global> {
+impl<T, C> ConvertAlloc<Vec<T, C>> for alloc_crate::boxed::Box<[T]>
+where
+    C: VecConfigAlloc<T, Alloc = Global>,
+{
+    #[inline]
+    fn convert(self) -> Vec<T, C> {
+        let boxed: Box<[T], C::Alloc> = self.convert();
+        boxed.into()
+    }
+}
+
+#[cfg(all(feature = "alloc", feature = "nightly"))]
+impl<T, C> ConvertAlloc<Vec<T, C>> for alloc_crate::boxed::Box<[T], C::Alloc>
+where
+    C: VecConfigAlloc<T>,
+{
+    #[inline]
+    fn convert(self) -> Vec<T, C> {
+        let boxed: Box<[T], C::Alloc> = self.convert();
+        boxed.into()
+    }
+}
+
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T, C> ConvertAlloc<alloc_crate::vec::Vec<T>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+{
     fn convert(self) -> alloc_crate::vec::Vec<T> {
         let (raw, len, cap) = self.into_raw_parts();
         unsafe { alloc_crate::vec::Vec::from_raw_parts(raw, len, cap) }
@@ -1652,91 +1672,66 @@ impl<T> ConvertAlloc<alloc_crate::vec::Vec<T>> for Vec<T, Global> {
 }
 
 #[cfg(all(feature = "alloc", feature = "nightly"))]
-impl<T, C: VecConfigAlloc<T>> ConvertAlloc<alloc_crate::vec::Vec<T, C::Alloc>> for Vec<T, Global> {
+impl<T, C> ConvertAlloc<alloc_crate::vec::Vec<T, C::Alloc>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+{
     fn convert(self) -> alloc_crate::vec::Vec<T, C::Alloc> {
         let (raw, len, cap, alloc) = self.into_raw_parts_with_alloc();
-        unsafe { alloc_crate::vec::Vec::from_raw_parts_in(raw, len, cap, alloc) }
+        unsafe {
+            alloc_crate::vec::Vec::from_raw_parts_in(raw, len.to_usize(), cap.to_usize(), alloc)
+        }
     }
 }
 
 #[cfg(all(feature = "alloc", not(feature = "nightly")))]
-impl<T> ConvertAlloc<Vec<T, Global>> for alloc_crate::vec::Vec<T> {
-    fn convert(self) -> Vec<T, Global> {
+impl<T, C> ConvertAlloc<Vec<T, C>> for alloc_crate::vec::Vec<T>
+where
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+{
+    fn convert(self) -> Vec<T, C> {
         let mut vec = ManuallyDrop::new(self);
         unsafe { Vec::from_raw_parts(vec.as_mut_ptr(), vec.len(), vec.capacity()) }
     }
 }
 
 #[cfg(all(feature = "alloc", feature = "nightly"))]
-impl<T, A: crate::alloc::Allocator> ConvertAlloc<Vec<T, A>> for alloc_crate::vec::Vec<T, A> {
-    fn convert(self) -> Vec<T, A> {
+impl<T, C> ConvertAlloc<Vec<T, C>> for alloc_crate::vec::Vec<T, C::Alloc>
+where
+    C: VecConfigAlloc<T, Index = usize>,
+{
+    fn convert(self) -> Vec<T, C> {
         let mut vec = ManuallyDrop::new(self);
         unsafe {
             Vec::from_raw_parts_in(
                 vec.as_mut_ptr(),
-                vec.len(),
-                vec.capacity(),
-                ptr::read(&vec.allocator()),
+                vec.len().into(),
+                vec.capacity().into(),
+                ptr::read(vec.allocator()),
             )
         }
     }
 }
 
-#[cfg(all(feature = "alloc", not(feature = "nightly")))]
-impl<T, C> From<Vec<T, C>> for alloc_crate::boxed::Box<[T]>
+impl<T, C> From<Box<[T], C::Alloc>> for Vec<T, C>
 where
-    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<T>,
 {
     #[inline]
-    fn from(vec: Vec<T, C>) -> Self {
-        alloc_crate::vec::Vec::<T>::from(vec).into_boxed_slice()
+    fn from(boxed: Box<[T], C::Alloc>) -> Self {
+        let (ptr, alloc) = boxed.into_handle().into_parts();
+        let len = C::Index::from_usize(ptr.len());
+        unsafe { Vec::from_parts(ptr.cast(), len, len, alloc) }
     }
 }
 
-#[cfg(all(feature = "alloc", not(feature = "nightly")))]
-impl<T, C> From<alloc_crate::vec::Vec<T>> for Vec<T, C>
+impl<T, C, const N: usize> From<Box<[T; N], C::Alloc>> for Vec<T, C>
 where
-    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+    C: VecConfigAlloc<T>,
 {
-    fn from(vec: alloc_crate::vec::Vec<T>) -> Self {
-        let capacity = vec.capacity();
-        let length = vec.len();
-        let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
-        unsafe { Self::from_parts(data, length, capacity, Global) }
-    }
-}
-
-#[cfg(all(feature = "alloc", not(feature = "nightly")))]
-impl<T, C> From<Vec<T, C>> for alloc_crate::vec::Vec<T>
-where
-    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
-{
-    fn from(vec: Vec<T, C>) -> Self {
-        let mut buffer = ManuallyDrop::new(vec.into_inner());
-        let capacity = buffer.capacity();
-        let length = buffer.length();
-        let data = buffer.data_ptr_mut();
-        unsafe { alloc_crate::vec::Vec::from_raw_parts(data, length, capacity) }
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<'b, T: Clone, C> From<alloc_crate::borrow::Cow<'b, [T]>> for Vec<T, C>
-where
-    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
-{
-    fn from(cow: alloc_crate::borrow::Cow<'b, [T]>) -> Self {
-        cow.into_owned().into()
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<'b, T: Clone, C> From<Vec<T, C>> for alloc_crate::borrow::Cow<'b, [T]>
-where
-    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
-{
-    fn from(vec: Vec<T, C>) -> alloc_crate::borrow::Cow<'b, [T]> {
-        alloc_crate::borrow::Cow::Owned(vec.into())
+    #[inline]
+    fn from(boxed: Box<[T; N], C::Alloc>) -> Self {
+        Box::into_boxed_slice(boxed).into()
     }
 }
 
@@ -1782,6 +1777,38 @@ impl<C: VecConfigNew<u8>> From<&str> for Vec<u8, C> {
     }
 }
 
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T, C> From<alloc_crate::boxed::Box<[T]>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+{
+    #[inline]
+    fn from(boxed: alloc_crate::boxed::Box<[T]>) -> Self {
+        boxed.convert()
+    }
+}
+
+#[cfg(all(feature = "alloc", feature = "nightly"))]
+impl<T, C> From<alloc_crate::boxed::Box<[T], C::Alloc>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Index = usize>,
+{
+    #[inline]
+    fn from(boxed: alloc_crate::boxed::Box<[T], C::Alloc>) -> Self {
+        boxed.convert()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'b, T: Clone, C> From<alloc_crate::borrow::Cow<'b, [T]>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+{
+    fn from(cow: alloc_crate::borrow::Cow<'b, [T]>) -> Self {
+        cow.into_owned().convert()
+    }
+}
+
 #[cfg(feature = "alloc")]
 impl<C> From<alloc_crate::string::String> for Vec<u8, C>
 where
@@ -1789,7 +1816,7 @@ where
 {
     #[inline]
     fn from(string: alloc_crate::string::String) -> Self {
-        string.into_bytes().into()
+        string.into_bytes().convert()
     }
 }
 
@@ -1808,7 +1835,7 @@ where
 {
     #[inline]
     fn from(string: alloc_crate::ffi::CString) -> Self {
-        string.into_bytes().into()
+        string.into_bytes().convert()
     }
 }
 
@@ -1817,6 +1844,35 @@ impl<C: VecConfigNew<u8>> From<&alloc_crate::ffi::CString> for Vec<u8, C> {
     #[inline]
     fn from(string: &alloc_crate::ffi::CString) -> Self {
         string.as_bytes().into()
+    }
+}
+
+#[cfg(all(feature = "alloc", not(feature = "nightly")))]
+impl<T, C> From<alloc_crate::vec::Vec<T>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Alloc = Global, Index = usize>,
+{
+    fn from(vec: alloc_crate::vec::Vec<T>) -> Self {
+        let capacity = vec.capacity();
+        let length = vec.len();
+        // SAFETY: the pointer to the Vec data is guaranteed to be non-null.
+        let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
+        unsafe { Self::from_parts(data, length, capacity, Global) }
+    }
+}
+
+#[cfg(all(feature = "alloc", feature = "nightly"))]
+impl<T, C> From<alloc_crate::vec::Vec<T, C::Alloc>> for Vec<T, C>
+where
+    C: VecConfigAlloc<T, Index = usize>,
+    C::Alloc: AllocatorDefault,
+{
+    fn from(vec: alloc_crate::vec::Vec<T, C::Alloc>) -> Self {
+        let capacity = vec.capacity();
+        let length = vec.len();
+        // SAFETY: the pointer to the Vec data is guaranteed to be non-null.
+        let data = unsafe { ptr::NonNull::new_unchecked(ManuallyDrop::new(vec).as_mut_ptr()) };
+        unsafe { Self::from_parts(data, length, capacity, C::Alloc::DEFAULT) }
     }
 }
 

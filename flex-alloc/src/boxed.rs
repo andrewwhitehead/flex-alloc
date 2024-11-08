@@ -1,9 +1,8 @@
 //! Support for values contained within allocated memory.
 
-use core::alloc::Layout;
 use core::borrow;
 use core::cmp::Ordering;
-use core::mem::{size_of, ManuallyDrop, MaybeUninit};
+use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
 use core::str;
@@ -13,191 +12,13 @@ use core::{fmt, ptr};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::alloc::{AllocateIn, Allocator, AllocatorDefault, Global};
+use crate::storage::boxed::RawBox;
 use crate::vec::config::VecConfigAlloc;
-use crate::vec::{insert::Inserter, Vec};
+use crate::vec::Vec;
 use crate::StorageError;
 
 #[cfg(feature = "alloc")]
 use crate::alloc::ConvertAlloc;
-
-pub(crate) struct RawBox<T: ?Sized, A: Allocator> {
-    ptr: NonNull<T>,
-    alloc: A,
-}
-
-impl<T: ?Sized, A: Allocator> RawBox<T, A> {
-    pub fn allocator(&self) -> &A {
-        &self.alloc
-    }
-
-    /// Get a const pointer to the beginning of the data allocation. This may be a
-    /// dangling pointer if `T` is zero sized or the current capacity is zero.
-    #[inline]
-    pub fn as_ptr(&self) -> *const T {
-        self.ptr.as_ptr()
-    }
-
-    /// Get a mutable pointer to the beginning of the data allocation. This may be a
-    /// dangling pointer if `T` is zero sized or the current capacity is zero.
-    #[inline]
-    pub fn as_mut_ptr(&self) -> *mut T {
-        self.ptr.as_ptr()
-    }
-
-    #[inline]
-    pub fn from_parts(ptr: NonNull<T>, alloc: A) -> Self {
-        Self { ptr, alloc }
-    }
-
-    #[inline]
-    pub fn into_parts(self) -> (NonNull<T>, A) {
-        let slf = ManuallyDrop::new(self);
-        (slf.ptr, unsafe { ptr::read(&slf.alloc) })
-    }
-
-    #[inline]
-    pub fn layout(&self) -> Layout {
-        Layout::for_value(unsafe { self.ptr.as_ref() })
-    }
-
-    #[inline]
-    pub unsafe fn cast<U>(self) -> RawBox<U, A> {
-        let (ptr, alloc) = self.into_parts();
-        RawBox::from_parts(
-            unsafe { NonNull::new_unchecked(ptr.as_ptr().cast()) },
-            alloc,
-        )
-    }
-}
-
-impl<T, A: Allocator> RawBox<T, A> {
-    #[inline]
-    pub fn alloc_in<I>(target: I) -> Result<RawBox<MaybeUninit<T>, A>, StorageError>
-    where
-        I: AllocateIn<Alloc = A>,
-    {
-        let (ptr, alloc) = target.allocate_in(Layout::new::<T>())?;
-        Ok(RawBox {
-            ptr: ptr.cast(),
-            alloc,
-        })
-    }
-
-    #[inline]
-    pub fn alloc_slice_in<I>(
-        target: I,
-        mut len: usize,
-        exact: bool,
-    ) -> Result<RawBox<[MaybeUninit<T>], A>, StorageError>
-    where
-        I: AllocateIn<Alloc = A>,
-    {
-        let layout = Layout::array::<T>(len)?;
-        let (ptr, alloc) = target.allocate_in(layout)?;
-        if !exact {
-            len = ptr.len() / size_of::<T>();
-        }
-        Ok(RawBox {
-            ptr: unsafe {
-                NonNull::new_unchecked(ptr::slice_from_raw_parts_mut(ptr.as_ptr().cast(), len))
-            },
-            alloc,
-        })
-    }
-}
-
-impl<T, A: AllocatorDefault> RawBox<T, A> {
-    #[inline]
-    pub fn alloc() -> Result<RawBox<MaybeUninit<T>, A>, StorageError> {
-        Self::alloc_in(A::DEFAULT)
-    }
-
-    #[inline]
-    pub fn alloc_slice(
-        len: usize,
-        exact: bool,
-    ) -> Result<RawBox<[MaybeUninit<T>], A>, StorageError> {
-        Self::alloc_slice_in(A::DEFAULT, len, exact)
-    }
-}
-
-impl<T, A: Allocator> RawBox<[T], A> {
-    #[inline]
-    pub fn dangling(alloc: A) -> Self {
-        Self {
-            ptr: {
-                unsafe {
-                    NonNull::new_unchecked(ptr::slice_from_raw_parts_mut(
-                        NonNull::<T>::dangling().as_ptr(),
-                        0,
-                    ))
-                }
-            },
-            alloc,
-        }
-    }
-}
-
-impl<T, A: Allocator> RawBox<MaybeUninit<T>, A> {
-    /// # Safety
-    /// The contents of the box must be initialized prior to calling, or else
-    /// undefined behavior may result from the use of uninitialized memory.
-    #[inline]
-    pub unsafe fn assume_init(self) -> RawBox<T, A> {
-        let (ptr, alloc) = self.into_parts();
-        RawBox {
-            ptr: ptr.cast(),
-            alloc,
-        }
-    }
-
-    #[inline(always)]
-    pub fn write(self, value: T) -> RawBox<T, A> {
-        unsafe {
-            self.ptr.as_ptr().write(MaybeUninit::new(value));
-            self.assume_init()
-        }
-    }
-}
-
-impl<T, A: Allocator> RawBox<[MaybeUninit<T>], A> {
-    /// # Safety
-    /// The contents of the box must be initialized prior to calling, or else
-    /// undefined behavior may result from the use of uninitialized memory.
-    #[inline]
-    pub unsafe fn assume_init(self) -> RawBox<[T], A> {
-        let (ptr, alloc) = self.into_parts();
-        let len = ptr.len();
-        RawBox {
-            ptr: unsafe {
-                NonNull::new_unchecked(ptr::slice_from_raw_parts_mut(ptr.as_ptr().cast(), len))
-            },
-            alloc,
-        }
-    }
-}
-
-impl<T: ?Sized, A: Allocator> AsRef<T> for RawBox<T, A> {
-    #[inline]
-    fn as_ref(&self) -> &T {
-        unsafe { self.ptr.as_ref() }
-    }
-}
-
-impl<T: ?Sized, A: Allocator> AsMut<T> for RawBox<T, A> {
-    #[inline]
-    fn as_mut(&mut self) -> &mut T {
-        unsafe { self.ptr.as_mut() }
-    }
-}
-
-impl<T: ?Sized, A: Allocator> Drop for RawBox<T, A> {
-    fn drop(&mut self) {
-        unsafe {
-            self.alloc.deallocate(self.ptr.cast(), self.layout());
-        }
-    }
-}
 
 /// A pointer type that uniquely owns an allocation of type `T`.
 pub struct Box<T: ?Sized, A: Allocator = Global> {
@@ -239,8 +60,7 @@ impl<T, A: AllocatorDefault> Box<T, A> {
 
     /// Unwraps this `Box` into its contained value.
     pub fn into_inner(boxed: Self) -> T {
-        let handle = boxed.into_handle();
-        unsafe { handle.ptr.as_ptr().read() }
+        boxed.into_handle().into_inner()
     }
 }
 
@@ -248,7 +68,10 @@ impl<T, A: AllocatorDefault> Box<[T], A> {
     /// Allocate uninitialized memory in the associated allocator.
     /// This doesn’t actually allocate if `T` is zero-sized.
     pub fn new_uninit_slice(len: usize) -> Box<[MaybeUninit<T>], A> {
-        Self::try_new_uninit_slice(len).expect("Allocation error")
+        match Self::try_new_uninit_slice(len) {
+            Ok(res) => res,
+            Err(err) => err.panic(),
+        }
     }
 
     /// Tries to allocate uninitialized memory in the associated allocator.
@@ -343,7 +166,10 @@ impl<T, A: Allocator> Box<[T], A> {
     where
         I: AllocateIn<Alloc = A>,
     {
-        Self::try_new_uninit_slice_in(len, alloc_in).expect("Allocation error")
+        match Self::try_new_uninit_slice_in(len, alloc_in) {
+            Ok(res) => res,
+            Err(err) => err.panic(),
+        }
     }
 
     /// Tries to allocates uninitialized memory in the associated allocation target.
@@ -361,7 +187,10 @@ impl<T, A: Allocator> Box<[T], A> {
     /// Convert this boxed slice into a `Vec<T, A>` without reallocating.
     pub fn into_vec(self) -> Vec<T, A> {
         let (ptr, alloc) = self.into_handle().into_parts();
-        unsafe { Vec::from_parts(ptr.cast(), ptr.len(), ptr.len(), alloc) }
+        let len = ptr.len();
+        // SAFETY: a boxed slice has a matching length and capacity. The pointer
+        // is a valid allocation for this allocator.
+        unsafe { Vec::from_parts(ptr.cast::<T>(), len, len, alloc) }
     }
 
     fn dangling(alloc: A) -> Box<[T], A> {
@@ -381,7 +210,10 @@ impl<A: Allocator> Box<str, A> {
     pub fn from_utf8(boxed: Box<[u8], A>) -> Result<Self, str::Utf8Error> {
         let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
         unsafe {
+            // SAFETY: the pointer is guaranteed to be a valid and unaliased.
             let strval = str::from_utf8_mut(&mut *ptr)?;
+            // SAFETY: only the type of the pointer has changed. The alignment
+            // of `str` is the same as `[u8]` and the allocation size is the same.
             Ok(Self::from_raw_in(strval, alloc))
         }
     }
@@ -392,7 +224,10 @@ impl<A: Allocator> Box<str, A> {
     /// The contained bytes must be valid UTF-8.
     pub unsafe fn from_utf8_unchecked(boxed: Box<[u8], A>) -> Self {
         let (ptr, alloc) = Box::into_raw_with_allocator(boxed);
+        // SAFETY: the pointer is guaranteed to be a valid and unaliased.
         let strval = str::from_utf8_unchecked_mut(&mut *ptr);
+        // SAFETY: only the type of the pointer has changed. The alignment
+        // of `str` is the same as `[u8]` and the allocation size is the same.
         Self::from_raw_in(strval, alloc)
     }
 }
@@ -400,19 +235,21 @@ impl<A: Allocator> Box<str, A> {
 impl<T: Clone, A: AllocatorDefault> Box<[T], A> {
     /// Create a boxed slice by cloning a slice reference.
     pub fn from_slice(data: &[T]) -> Self {
-        Self::try_from_slice(data).expect("Allocation error")
+        match Self::try_from_slice(data) {
+            Ok(res) => res,
+            Err(err) => err.panic(),
+        }
     }
 
     /// Try to create a boxed slice by cloning a slice reference.
     pub fn try_from_slice(data: &[T]) -> Result<Self, StorageError> {
         let len = data.len();
-        let mut buf = Self::try_new_uninit_slice(len)?;
-        let mut insert = Inserter::for_uninit_slice(buf.handle.as_mut());
-        for value in data {
-            insert.push_clone(value);
-        }
-        insert.complete();
-        Ok(unsafe { buf.assume_init() })
+        let handle = RawBox::alloc_slice(len, true)?;
+        Ok(Self {
+            handle: handle.write_slice(|insert| {
+                insert.push_slice(data);
+            }),
+        })
     }
 }
 
@@ -422,7 +259,10 @@ impl<T: Clone, A: Allocator> Box<[T], A> {
     where
         I: AllocateIn<Alloc = A>,
     {
-        Self::try_from_slice_in(data, alloc_in).expect("Allocation error")
+        match Self::try_from_slice_in(data, alloc_in) {
+            Ok(res) => res,
+            Err(err) => err.panic(),
+        }
     }
 
     /// Try to create a boxed slice directly in an allocation target by cloning a slice reference.
@@ -431,13 +271,12 @@ impl<T: Clone, A: Allocator> Box<[T], A> {
         I: AllocateIn<Alloc = A>,
     {
         let len = data.len();
-        let mut buf = Self::try_new_uninit_slice_in(len, alloc_in)?;
-        let mut insert = Inserter::for_uninit_slice(buf.handle.as_mut());
-        for value in data {
-            insert.push_clone(value);
-        }
-        insert.complete();
-        Ok(unsafe { buf.assume_init() })
+        let handle = RawBox::alloc_slice_in(alloc_in, len, true)?;
+        Ok(Self {
+            handle: handle.write_slice(|insert| {
+                insert.push_slice(data);
+            }),
+        })
     }
 }
 
@@ -513,12 +352,15 @@ impl<T: ?Sized, A: Allocator> Box<T, A> {
     where
         A: 'a,
     {
-        let (ptr, _alloc) = Self::into_raw_with_allocator(boxed);
-        unsafe { &mut *ptr }
+        boxed.into_handle().leak()
     }
 
     #[inline]
-    fn into_handle(self) -> RawBox<T, A> {
+    pub(crate) fn into_handle(self) -> RawBox<T, A> {
+        // SAFETY: this simply extracts the handle without running
+        // the `Drop` implementation for this `Box`. It is safe to
+        // read from a pointer derived from a reference and the
+        // aliasing rules are not violated.
         unsafe { ptr::read(&ManuallyDrop::new(self).handle) }
     }
 }
@@ -571,12 +413,7 @@ impl<T, A: Allocator, const N: usize> Box<[T; N], A> {
     pub fn into_boxed_slice(boxed: Self) -> Box<[T], A> {
         let (ptr, alloc) = boxed.into_handle().into_parts();
         Box {
-            handle: RawBox {
-                ptr: unsafe {
-                    NonNull::new_unchecked(ptr::slice_from_raw_parts_mut(ptr.as_ptr().cast(), N))
-                },
-                alloc,
-            },
+            handle: RawBox::from_parts(NonNull::slice_from_raw_parts(ptr.cast::<T>(), N), alloc),
         }
     }
 }
@@ -621,8 +458,15 @@ impl<T: Clone, A: Allocator + Clone> Clone for Box<[T], A> {
 impl<A: Allocator + Clone> Clone for Box<str, A> {
     fn clone(&self) -> Self {
         let boxed = Box::<[u8], A>::from_slice_in(self.as_bytes(), self.allocator().clone());
+        // SAFETY: the Box contents are guaranteed to be valid UTF-8 data.
         unsafe { Box::from_utf8_unchecked(boxed) }
     }
+}
+
+#[cfg(feature = "nightly")]
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized, A: Allocator>
+    core::ops::CoerceUnsized<Box<U, A>> for Box<T, A>
+{
 }
 
 impl<T: ?Sized + fmt::Debug, A: Allocator> fmt::Debug for Box<T, A> {
@@ -645,6 +489,7 @@ impl<T, A: AllocatorDefault> Default for Box<[T], A> {
 
 impl<A: AllocatorDefault> Default for Box<str, A> {
     fn default() -> Self {
+        // SAFETY: an empty (dangling) Box is valid UTF-8.
         unsafe { Box::from_utf8_unchecked(Box::dangling(A::DEFAULT)) }
     }
 }
@@ -693,6 +538,7 @@ impl<T, A: AllocatorDefault, const N: usize> From<[T; N]> for Box<[T], A> {
 impl<A: AllocatorDefault> From<&str> for Box<str, A> {
     fn from(data: &str) -> Self {
         let boxed = Box::from_slice(data.as_bytes());
+        // SAFETY: the Box contents are guaranteed to be valid UTF-8 data.
         unsafe { Self::from_utf8_unchecked(boxed) }
     }
 }
@@ -810,3 +656,16 @@ impl<T: ?Sized + Zeroize, A: Allocator> Zeroize for Box<T, A> {
 
 #[cfg(feature = "zeroize")]
 impl<T: ?Sized, A: crate::alloc::AllocatorZeroizes> ZeroizeOnDrop for Box<T, A> {}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(all(feature = "alloc", feature = "nightly"))]
+    #[test]
+    fn box_unsized() {
+        use core::any::Any;
+
+        use super::Box;
+
+        let _ = Box::new(10usize) as Box<dyn Any>;
+    }
+}

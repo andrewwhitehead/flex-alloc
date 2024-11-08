@@ -22,6 +22,15 @@ pub use allocator_api2::alloc::{AllocError, Allocator};
 #[cfg(feature = "zeroize")]
 use zeroize::Zeroize;
 
+#[cfg(all(not(test), feature = "alloc"))]
+pub use alloc_crate::alloc::handle_alloc_error;
+
+#[cfg(any(test, not(feature = "alloc")))]
+/// Custom allocation error handler.
+pub fn handle_alloc_error(layout: Layout) -> ! {
+    panic!("memory allocation of {} bytes failed", layout.size());
+}
+
 /// The AllocError error indicates an allocation failure that may be due to
 /// resource exhaustion or to something wrong when combining the given input
 /// arguments with this allocator.
@@ -96,10 +105,12 @@ pub unsafe trait Allocator {
     #[inline]
     fn allocate_zeroed(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let ptr = self.allocate(layout)?;
+        // SAFETY: the result of `allocate` must be properly aligned
         unsafe { ptr::write_bytes(ptr.cast::<u8>().as_ptr(), 0, ptr.len()) };
         Ok(ptr)
     }
 
+    /// Try to extend the size of an allocation to accomodate a new, larger layout.
     unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
@@ -123,6 +134,8 @@ pub unsafe trait Allocator {
         Ok(new_ptr)
     }
 
+    /// Try to extend the size of an allocation to accomodate a new, larger layout.
+    /// Fill the extra capacity with zeros.
     unsafe fn grow_zeroed(
         &self,
         ptr: NonNull<u8>,
@@ -146,6 +159,7 @@ pub unsafe trait Allocator {
         Ok(new_ptr)
     }
 
+    /// Try to reduce the size of an allocation to accomodate a new, smaller layout.
     unsafe fn shrink(
         &self,
         ptr: NonNull<u8>,
@@ -169,6 +183,7 @@ pub unsafe trait Allocator {
         Ok(new_ptr)
     }
 
+    /// Obtain a reference to this allocator type.
     #[inline(always)]
     fn by_ref(&self) -> &Self
     where
@@ -197,6 +212,7 @@ pub trait AllocateIn: Sized {
         layout: Layout,
     ) -> Result<(NonNull<[u8]>, Self::Alloc), AllocError> {
         let (ptr, alloc) = self.allocate_in(layout)?;
+        // SAFETY: the result of `allocate` must be properly aligned
         unsafe { ptr::write_bytes(ptr.cast::<u8>().as_ptr(), 0, ptr.len()) };
         Ok((ptr, alloc))
     }
@@ -267,6 +283,7 @@ unsafe impl Allocator for Global {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let ptr = if layout.size() == 0 {
             // FIXME: use Layout::dangling when stabilized
+            // SAFETY: layout alignments are guaranteed to be non-zero.
             #[allow(clippy::useless_transmute)]
             unsafe {
                 NonNull::new_unchecked(transmute(layout.align()))
