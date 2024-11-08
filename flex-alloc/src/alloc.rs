@@ -31,6 +31,17 @@ pub fn handle_alloc_error(layout: Layout) -> ! {
     panic!("memory allocation of {} bytes failed", layout.size());
 }
 
+#[cfg(all(feature = "alloc", not(feature = "allocator-api2")))]
+#[inline]
+pub(crate) fn layout_dangling(layout: Layout) -> NonNull<u8> {
+    // FIXME: use Layout::dangling when stabilized
+    // SAFETY: layout alignments are guaranteed to be non-zero.
+    #[allow(clippy::useless_transmute)]
+    unsafe {
+        NonNull::new_unchecked(transmute(layout.align()))
+    }
+}
+
 /// The AllocError error indicates an allocation failure that may be due to
 /// resource exhaustion or to something wrong when combining the given input
 /// arguments with this allocator.
@@ -282,12 +293,7 @@ unsafe impl Allocator for Global {
     #[inline]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let ptr = if layout.size() == 0 {
-            // FIXME: use Layout::dangling when stabilized
-            // SAFETY: layout alignments are guaranteed to be non-zero.
-            #[allow(clippy::useless_transmute)]
-            unsafe {
-                NonNull::new_unchecked(transmute(layout.align()))
-            }
+            layout_dangling(layout)
         } else {
             let Some(ptr) = NonNull::new(unsafe { raw_alloc(layout) }) else {
                 return Err(AllocError);
@@ -330,8 +336,12 @@ pub struct Fixed<'a>(PhantomData<&'a mut ()>);
 
 unsafe impl Allocator for Fixed<'_> {
     #[inline(always)]
-    fn allocate(&self, _layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        Err(AllocError)
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        if layout.size() == 0 {
+            Ok(NonNull::slice_from_raw_parts(NonNull::dangling(), 0))
+        } else {
+            Err(AllocError)
+        }
     }
 
     #[inline(always)]
