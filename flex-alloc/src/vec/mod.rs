@@ -1,6 +1,11 @@
 //! Support for generic vector structures containing a (generally) resizable, contiguous array
 //! of items.
 //!
+//! Unlike `std::vec::Vec`, this vector type supports allocation within a fixed buffer (such
+//! as a stack-based array or byte buffer), allowing it to be used in `no-std` environments,
+//! or customized for improved performance in specialized use cases. Additional fallible
+//! constructors and update methods are also provided for handling allocation errors.
+//!
 //! # Usage
 //!
 //! ## Fixed storage
@@ -9,11 +14,11 @@
 //! stored on the stack or statically.
 //!
 //! ```
-//! use flex_alloc::{storage::byte_storage, vec::Vec};
+//! use flex_alloc::{storage::byte_storage, vec::{FixedVec, Vec}};
 //!
 //! let mut buf = byte_storage::<1024>();
-//! let mut v = Vec::new_in(&mut buf);
-//! v.push(22usize);
+//! let mut v: FixedVec<usize> = Vec::new_in(&mut buf);
+//! v.push(22);
 //! ```
 //!
 //! A fixed storage buffer may also be chained to an allocator, meaning that
@@ -24,22 +29,26 @@
 //!
 //! ```
 //! # #[cfg(feature = "alloc")] {
-//! use flex_alloc::{alloc::SpillAlloc, storage::array_storage, vec::Vec};
+//! use flex_alloc::{
+//!     alloc::SpillAlloc,
+//!     storage::array_storage,
+//!     vec::{SpillVec, Vec}
+//! };
 //!
 //! let mut buf = array_storage::<_, 100>();
-//! let mut v = Vec::new_in(buf.spill_alloc());
+//! let mut v: SpillVec<usize> = Vec::new_in(buf.spill_alloc());
 //! v.extend(1..1000);
 //! # }
 //! ```
 //!
-//! ### Custom allocators
+//! ## Custom allocators
 //!
 //! Additional allocators may be defined by implementing the
 //! [`Allocator`][crate::alloc::Allocator] trait. The `allocator-api2` flag also
 //! enables compatibility with `allocator_api2::alloc::Allocator` implementations.
 //! See `examples/bumpalo/` for an demonstration integrating the `bumpalo` allocator.
 //!
-//! ### `zeroize` integration
+//! ## `zeroize` integration
 //!
 //! Integration with `zeroize` is implemented at the allocator level in order
 //! to ensure that all buffers are zeroized, including intermediate
@@ -70,7 +79,7 @@
 //! # }
 //! ```
 //!
-//! ### Inline vectors
+//! ## Inline vectors
 //!
 //! [`Vec`] can support inline storage of the contained data. This may be
 //! appropriate when the maximum number of elements is known and the vector
@@ -88,7 +97,7 @@
 //! let v = vec![in Inline::<5>; 1, 2, 3, 4, 5];
 //! ```
 //!
-//! ### Thin vectors
+//! ## Thin vectors
 //!
 //! Like the `thin-vec` crate (but without compatibility with Gecko), vectors
 //! may be customized to use a pointer-sized representation with the capacity
@@ -105,7 +114,7 @@
 //! # }
 //! ```
 //!
-//! ### Custom index sizes and growth behavior
+//! ## Custom index sizes and growth behavior
 //!
 //! [`Vec`] may be parameterized to use an alternative index type and/or
 //! alternative growth pattern when memory consumption is a concern. The
@@ -141,7 +150,7 @@ use const_default::ConstDefault;
 #[cfg(feature = "zeroize")]
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::alloc::{AllocatorDefault, Global};
+use crate::alloc::{AllocatorDefault, Fixed, Global, Spill};
 use crate::boxed::Box;
 use crate::capacity::{Grow, Index};
 use crate::error::{StorageError, UpdateError};
@@ -166,8 +175,15 @@ mod drain;
 mod into_iter;
 mod splice;
 
+/// A vector which stores its contained data in a fixed external buffer.
+pub type FixedVec<'a, T> = Vec<T, Fixed<'a>>;
+
 /// A vector which stores its contained data inline, using no external allocation.
 pub type InlineVec<T, const N: usize> = Vec<T, Inline<N>>;
+
+/// A vector which stores its contained data in a fixed external buffer,
+/// spilling to an allocator when the capacity of the buffer is exceeded.
+pub type SpillVec<'a, T, A = Global> = Vec<T, Spill<'a, A>>;
 
 #[cfg(feature = "alloc")]
 /// A vector which is pointer-sized, storing its capacity and length in the
