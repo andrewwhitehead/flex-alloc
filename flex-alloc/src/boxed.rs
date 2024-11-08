@@ -1,4 +1,71 @@
 //! Support for values contained within allocated memory.
+//!
+//! Unlike `std::boxed::Box`, this Box type supports allocation within a fixed buffer.
+//! Additional fallible constructors and update methods are provided for handling
+//! allocation errors.
+//!
+//! # Usage
+//!
+//! ## Fixed storage
+//!
+//! [`Box`] instances may be allocated in fixed storage, a buffer which might be
+//! stored on the stack or statically. This can help to work with dynamically
+//! sized types such as `str` or `[u8]` using only the stack.
+//!
+//! ```
+//! use flex_alloc::{boxed::{Box, FixedBox}, storage::byte_storage};
+//!
+//! let mut buf = byte_storage::<1024>();
+//! let boxed: FixedBox<[usize]> = Box::from_slice_in(&[1, 2, 3], &mut buf);
+//! ```
+//!
+//! A fixed storage buffer may also be chained to an allocator, meaning that
+//! when the capacity of the buffer is exceeded, then the allocator will be
+//! used to obtain additional memory. For critical sections where the size of
+//! the input is variable but may often fit on the stack, this can help to
+//! eliminate costly allocations and lead to performance improvements.
+//!
+//! ```
+//! # #[cfg(feature = "alloc")] {
+//! use flex_alloc::{
+//!     alloc::SpillAlloc,
+//!     boxed::{Box, SpillBox},
+//!     storage::byte_storage
+//! };
+//!
+//! let mut buf = byte_storage::<1024>();
+//! let boxed: SpillBox<[usize; 100]> = Box::new_in([1; 100], buf.spill_alloc());
+//! # }
+//! ```
+//!
+//! ## Unsized support
+//!
+//! Coercion of the [`Box`] type to a trait object such as [`Box<dyn Any>`]
+//! currently requires a `nightly` Rust compiler as well as the `nightly` crate
+//! feature.
+//!
+//! ```
+//! # #[cfg(feature = "nightly")] {
+//! use core::any::Any;
+//! use flex_alloc::{boxed::Box};
+//!
+//! let boxed = Box::new(99usize) as Box<dyn Any + Send>;
+//! # }
+//! ```
+//!
+//! ## `zeroize` integration
+//!
+//! Integration with `zeroize` is implemented at the allocator level in order
+//! to zeroize the underlying memory after the contained values have been
+//! dropped, which can be supported even for types that do not implement
+//! [`Zeroize`].
+//!
+//! ```
+//! # #[cfg(all(feature = "alloc", feature = "zeroize"))] {
+//! use flex_alloc::boxed::ZeroizingBox;
+//!
+//! let boxed = ZeroizingBox::<[usize]>::from([1, 2, 3]);
+//! # }
 
 use core::borrow;
 use core::cmp::Ordering;
@@ -11,7 +78,7 @@ use core::{fmt, ptr};
 #[cfg(feature = "zeroize")]
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::alloc::{AllocateIn, Allocator, AllocatorDefault, Global};
+use crate::alloc::{AllocateIn, Allocator, AllocatorDefault, Fixed, Global, Spill};
 use crate::storage::boxed::RawBox;
 use crate::vec::config::VecConfigAlloc;
 use crate::vec::Vec;
@@ -19,6 +86,17 @@ use crate::StorageError;
 
 #[cfg(feature = "alloc")]
 use crate::alloc::ConvertAlloc;
+
+/// A box which stores its contained data in a fixed external buffer.
+pub type FixedBox<'a, T> = Box<T, Fixed<'a>>;
+
+/// A box which stores its contained data in a fixed external buffer,
+/// spilling to an allocator when the capacity of the buffer is exceeded.
+pub type SpillBox<'a, T, A = Global> = Box<T, Spill<'a, A>>;
+
+#[cfg(feature = "zeroize")]
+/// A vector which automatically zeroizes its buffer when dropped.
+pub type ZeroizingBox<T> = Box<T, crate::alloc::ZeroizingAlloc<Global>>;
 
 /// A pointer type that uniquely owns an allocation of type `T`.
 pub struct Box<T: ?Sized, A: Allocator = Global> {
