@@ -10,7 +10,7 @@
 //!
 //! [`Box`] instances may be allocated in fixed storage, a buffer which might be
 //! stored on the stack or statically. This can help to work with dynamically
-//! sized types such as `str` or `[u8]` using only the stack.
+//! sized types such as `str` or `[u8]` without allocating.
 //!
 //! ```
 //! use flex_alloc::{boxed::{Box, FixedBox}, storage::byte_storage};
