@@ -9,7 +9,7 @@ use rstest::rstest;
 use const_default::ConstDefault;
 #[cfg(feature = "alloc")]
 use flex_alloc::{
-    alloc::{Global, SpillAlloc},
+    alloc::{Fixed, Global, SpillAlloc},
     boxed::Box as FlexBox,
     vec,
     vec::{
@@ -44,6 +44,7 @@ fn vec_default<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
 #[cfg_attr(feature="alloc", case::global(Cfg::<Global>))]
 #[cfg_attr(feature="alloc", case::thin(Cfg::<Thin>))]
 #[cfg_attr(feature="alloc", case::custom(Cfg::<Custom<Global, u8>>))]
+#[case::inline(Cfg::<Fixed>)]
 #[case::inline(Cfg::<Inline<10>>)]
 fn vec_new_as_slice<C: VecConfigNew<usize>>(#[case] _config: Cfg<C>) {
     let mut v = FlexVec::<usize, C>::new();
@@ -97,6 +98,7 @@ fn vec_with_capacity_in_push<C: VecNewIn<usize>>(#[case] buf: C) {
 #[cfg_attr(feature="alloc", case::thin(Cfg::<Thin>))]
 #[cfg_attr(feature="alloc", case::custom(Cfg::<Custom<Global, u8>>))]
 #[case::inline(Cfg::<Inline<10>>)]
+#[case::inline(Cfg::<Fixed>)] // ZST can be stored in Fixed without a buffer
 fn vec_with_capacity_push_zst<C: VecConfigNew<Zst>>(#[case] _config: Cfg<C>) {
     let mut v = FlexVec::<Zst, C>::with_capacity(C::Index::from_usize(10));
     v.push(Zst);
@@ -436,20 +438,21 @@ fn vec_splice_compat() {
     assert_eq!(&v[..], &[0, 11, 12, 13, 14, 15, 5, 6, 7, 8, 9])
 }
 
-#[cfg(feature = "alloc")]
-#[test]
-fn vec_zst() {
-    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    struct Zst;
-
-    let mut b = FlexVec::<Zst>::new();
+#[rstest]
+#[cfg_attr(feature="alloc", case::global(Cfg::<Global>))]
+#[cfg_attr(feature="alloc", case::thin(Cfg::<Thin>))]
+#[cfg_attr(feature="alloc", case::custom(Cfg::<Custom<Global, u8>>))]
+#[case::inline(Cfg::<Inline<10>>)]
+#[case::inline(Cfg::<Fixed>)]
+fn vec_zst<C: VecConfigNew<Zst>>(#[case] _config: Cfg<C>) {
+    let mut b = FlexVec::<Zst, C>::new();
     b.push(Zst);
-    assert_eq!(b.len(), 1);
+    assert_eq!(b.len().to_usize(), 1);
     assert_eq!(b[0], Zst);
     assert_eq!(b.pop(), Some(Zst));
     assert_eq!(b.pop(), None);
 
-    let mut b = FlexVec::<Zst>::new();
+    let mut b = FlexVec::<Zst, C>::new();
     b.extend([Zst, Zst, Zst]);
     let mut drain = b.drain(..);
     assert_eq!(drain.len(), 3);
@@ -458,7 +461,7 @@ fn vec_zst() {
     assert_eq!(drain.next(), Some(Zst));
     assert_eq!(drain.next(), None);
 
-    let mut b = FlexVec::<Zst>::new();
+    let mut b = FlexVec::<Zst, C>::new();
     b.extend([Zst, Zst, Zst]);
     let mut iter = b.into_iter();
     assert_eq!(iter.len(), 3);

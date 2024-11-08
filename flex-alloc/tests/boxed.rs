@@ -6,7 +6,7 @@ use core::marker::PhantomData as Cfg;
 use rstest::rstest;
 
 #[cfg(feature = "alloc")]
-use flex_alloc::alloc::{AllocatorDefault, Global, SpillAlloc};
+use flex_alloc::alloc::{AllocatorDefault, Fixed, Global, SpillAlloc};
 use flex_alloc::{
     alloc::AllocateIn,
     boxed::Box as FlexBox,
@@ -28,6 +28,7 @@ fn box_default<A: AllocatorDefault>(#[case] _config: Cfg<A>) {
 #[rstest]
 #[cfg(feature = "alloc")]
 #[case::global(Cfg::<Global>)]
+#[case::global(Cfg::<Fixed>)] // empty slice can be allocated without a buffer
 fn box_new_empty_slice<A: AllocatorDefault>(#[case] _config: Cfg<A>) {
     let v = FlexBox::<[usize], A>::new_uninit_slice(0);
     assert!(v.is_empty());
