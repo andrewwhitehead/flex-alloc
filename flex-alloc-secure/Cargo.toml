@@ -21,7 +21,7 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [dependencies]
-ascon-aead = "0.4"
+chacha20poly1305 = { version = "0.10", features = ["reduced-round"] }
 const-default = "1"
 flex-alloc = { path = "../flex-alloc", features = ["alloc", "zeroize"] }
 rand_core = { version = "0.6", features = ["getrandom"] }

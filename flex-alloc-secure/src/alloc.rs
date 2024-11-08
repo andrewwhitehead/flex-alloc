@@ -321,14 +321,17 @@ unsafe impl Allocator for SecureAlloc {
         let layout_len = layout.size();
         if layout_len == 0 {
             // FIXME: use Layout::dangling when stabilized
+            // SAFETY: layout alignments are guaranteed to be non-zero.
             #[allow(clippy::useless_transmute)]
-            let range = ptr::slice_from_raw_parts_mut(unsafe { transmute(layout.align()) }, 0);
-            Ok(unsafe { NonNull::new_unchecked(range) })
+            let head = unsafe { NonNull::new_unchecked(transmute(layout.align())) };
+            Ok(NonNull::slice_from_raw_parts(head, 0))
         } else {
             let alloc = alloc_pages(layout_len).map_err(|_| AllocError)?;
             let alloc_len = alloc.len();
 
             // Initialize with uninitialized indicator value
+            // SAFETY: the allocated pointer is guaranteed to be valid and have a length
+            // equal to `alloc_len`.
             unsafe { ptr::write_bytes(alloc.as_ptr().cast::<u8>(), UNINIT_ALLOC_BYTE, alloc_len) };
 
             // Keep data page(s) out of swap

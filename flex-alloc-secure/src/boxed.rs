@@ -9,9 +9,9 @@ use core::slice;
 use core::sync::atomic;
 use std::sync::Once;
 
-use ascon_aead::{
+use chacha20poly1305::{
     aead::{AeadInPlace, KeyInit},
-    Ascon128a, Ascon128aKey, Ascon128aTag,
+    ChaCha8Poly1305,
 };
 use flex_alloc::boxed::Box;
 use rand_core::{OsRng, RngCore};
@@ -40,15 +40,14 @@ const ASSOC_DATA_SIZE: usize = 16384;
 pub type SecureBox<T> = Box<T, SecureAlloc>;
 
 /// A [`flex-alloc Box`](flex_alloc::boxed::Box) container type which applies
-/// additional protections around the allocated memory.
+/// additional protections around the memory allocation.
 ///
 /// - The memory is allocated using [`SecureAlloc`] and flagged to remain
-///   resident in physical memory.
+///   resident in physical memory (using `mlock`/`VirtualLock`).
 /// - When released, the allocated memory is securely zeroed.
 /// - When not currently being accessed by the methods of the
 ///   [`ExposeProtected`] trait, the allocated memory pages are flagged
-///   for protection from other processes using `mprotect`
-///   (`VirtualProtect` on Windows).
+///   for protection from other processes (using `mprotect`/`VirtualProtect`).
 pub struct ProtectedBox<T: ?Sized> {
     shared: SharedAccess<SecureBox<T>>,
 }
@@ -158,23 +157,23 @@ unsafe impl<T: Sync + ?Sized> Sync for ProtectedBox<T> {}
 impl<T: ?Sized> ZeroizeOnDrop for ProtectedBox<T> {}
 
 /// A [`flex-alloc Box`](flex_alloc::boxed::Box) container type which applies
-/// additional protections around the allocated memory.
+/// additional protections around the allocated memory, and is encrypted when
+/// not currently being accessed.
 ///
 /// - The memory is allocated using [`SecureAlloc`] and flagged to remain
-///   resident in physical memory.
+///   resident in physical memory (using `mlock`/`VirtualLock`).
 /// - When released, the allocated memory is securely zeroed.
 /// - When not currently being accessed by the methods of the
 ///   [`ExposeProtected`] trait, the allocated memory pages are flagged
-///   for protection from other processes using `mprotect`
-///   (`VirtualProtect` on Windows).
+///   for protection from other processes using (`mprotect`/`VirtualProtect`).
 /// - When not currently being accessed, the allocated memory is
-///   encrypted using the Ascon128a encryption cipher. A large (16Kb)
+///   encrypted using the ChaCha8 encryption cipher. A large (16Kb)
 ///   buffer of randomized bytes is used as associated data during the
 ///   encryption and decryption process.
 pub struct ShieldedBox<T: ?Sized> {
     shared: SharedAccess<SecureBox<T>>,
-    key: Ascon128aKey,
-    tag: Ascon128aTag,
+    key: chacha20poly1305::Key,
+    tag: chacha20poly1305::Tag,
 }
 
 impl<T: Default> Default for ShieldedBox<T> {
@@ -277,8 +276,8 @@ impl<T: ?Sized> From<SecureBox<T>> for ShieldedBox<T> {
     fn from(boxed: SecureBox<T>) -> Self {
         let mut wrapper = Self {
             shared: SharedAccess::new(boxed),
-            key: Ascon128aKey::default(),
-            tag: Ascon128aTag::default(),
+            key: Default::default(),
+            tag: Default::default(),
         };
         wrapper.key.fill_random(OsRng);
         let mut data = BoxData::for_boxed(wrapper.shared.as_mut());
@@ -404,20 +403,20 @@ impl BoxData {
     }
 
     #[must_use]
-    fn encrypt(&mut self, key: &Ascon128aKey) -> Ascon128aTag {
+    fn encrypt(&mut self, key: &chacha20poly1305::Key) -> chacha20poly1305::Tag {
         let buffer = unsafe { slice::from_raw_parts_mut(self.ptr, self.len) };
-        let ascon = Ascon128a::new(key);
+        let engine = ChaCha8Poly1305::new(key);
         let nonce = Default::default();
-        ascon
+        engine
             .encrypt_in_place_detached(&nonce, encryption_assoc_data(), buffer)
             .expect("Shielded box encryption error")
     }
 
-    pub fn decrypt(&mut self, key: &Ascon128aKey, tag: Ascon128aTag) {
+    pub fn decrypt(&mut self, key: &chacha20poly1305::Key, tag: chacha20poly1305::Tag) {
         let buffer = unsafe { slice::from_raw_parts_mut(self.ptr, self.len) };
-        let ascon = Ascon128a::new(key);
+        let engine = ChaCha8Poly1305::new(key);
         let nonce = Default::default();
-        ascon
+        engine
             .decrypt_in_place_detached(&nonce, encryption_assoc_data(), buffer, &tag)
             .expect("Shielded box decryption error")
     }
