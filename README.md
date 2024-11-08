@@ -1,10 +1,8 @@
 # flex-alloc
 
-This crate provides highly flexible container types (currently `Box`, `Cow`, and `Vec`) which mimic the API provided in `std`, with allocation flexibility going beyond what is supported by unstable features such as `allocator-api`.
+This repository contains two related Rust crates, see the API documentation here: - (`flex-alloc`)[https://docs.rs/flex-alloc] - (`flex-alloc-secure`)[https://docs.rs/flex-alloc-secure]
 
-Both `no-std` and `no-alloc` environments are supported.
-
-## Highlights
+## `flex-alloc` highlights
 
 - Optional `alloc` support, such that application may easily alternate between fixed buffers and heap allocation.
 - Custom allocator implementations, including the ability to spill from a small stack allocation to a heap allocation.
@@ -13,21 +11,10 @@ Both `no-std` and `no-alloc` environments are supported.
 - Support for inline collections.
 - Custom index types and growth behavior to manage memory usage.
 
-## Feature flags
+## `flex-alloc-secure` highlights
 
-- The `std` flag (off by default) enables compatibility with the `std::error::Error` trait for error types, adds `io::Write` support to `Vec`, and also enables the `alloc` feature.
-
-- With the `alloc` feature (on by default), access to the global allocator is enabled, and default constructors for allocated containers (such as `Vec::new`) are supported.
-
-- The `allocator-api2` feature enables integration with the `allocator-api2` crate, which offers support for the `allocator-api` feature set on stable Rust. This can allow for allocators implementing the API to be passed to `Vec::new_in`.
-
-- The `nightly` feature enables compatibility with the unstable Rust `allocator-api` feature. This requires a nightly Rust compiler build.
-
-- The `zeroize` feature enables integration with the `zeroize` crate, including a zeroizing allocator. This can be used to automatically zero out allocated memory for allocated types, including the intermediate buffers produced during resizing in the case of `Vec`.
-
-## Credits
-
-This crate is partly inspired by [coca](https://crates.io/crates/coca), which has generally broader functionality, but currently only supports fixed-size containers. Portions are adapted from the Rust standard library.
+- Collection types for working with secured allocations, using multiple levels of protections: memory locking (`mlock`/`VirtualLock`), memory protection (`mprotect`/`VirtualProtect`), and encryption at rest.
+- Secure stack variables for working with sensitive data.
 
 ## License
 
