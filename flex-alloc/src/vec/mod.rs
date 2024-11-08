@@ -227,9 +227,7 @@ impl<T> Iterator for DropSlice<T> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.len > 0 {
             let ret = self.ptr;
-            unsafe {
-                self.ptr = self.ptr.add(1);
-            }
+            unsafe { self.ptr = self.ptr.add(1) };
             self.len -= 1;
             Some(ret)
         } else {
@@ -764,20 +762,22 @@ impl<T, C: VecConfig> Vec<T, C> {
         let mut new_len = 1;
         let mut head = self.as_mut_ptr();
         let tail_slice = DropSlice {
+            // SAFETY: `head + 1` is established to be within the buffer
             ptr: unsafe { head.add(1) },
             len: orig_len - 1,
         };
         for tail in tail_slice {
             if !cmp(unsafe { &mut *tail }, unsafe { &mut *head }) {
+                // SAFETY: head is always < tail before this
                 head = unsafe { head.add(1) };
                 if head != tail {
+                    // SAFETY: the pointers are distinct and valid
                     unsafe { ptr::copy_nonoverlapping(tail, head, 1) };
                 }
                 new_len += 1;
             } else {
-                unsafe {
-                    ptr::drop_in_place(tail);
-                }
+                // SAFETY: DropSlice only yields pointers to initialized items
+                unsafe { ptr::drop_in_place(tail) };
             }
         }
         // SAFETY: capacity of the buffer has been established as > 0
@@ -819,9 +819,8 @@ impl<T, C: VecConfig> Vec<T, C> {
             Ok(_) => (),
             Err(error) => error.panic(),
         }
-        unsafe {
-            self.extend_unchecked(items);
-        }
+        // SAFETY: the extra capacity is ensured by `_try_reserve`
+        unsafe { self.extend_unchecked(items) };
     }
 
     /// Try to clone each entry in `items` and push it onto this vector.
@@ -833,9 +832,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         T: Clone,
     {
         self._try_reserve(items.len(), false)?;
-        unsafe {
-            self.extend_unchecked(items);
-        }
+        // SAFETY: the extra capacity is ensured by `_try_reserve`
+        unsafe { self.extend_unchecked(items) };
         Ok(())
     }
 
@@ -858,6 +856,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         insert.push_slice(&head[range]);
         let added = insert.complete();
         if added > 0 {
+            // SAFETY: the capacity of the buffer is guaranteed to be >= prev_len + added
             unsafe { self.buffer.set_length(prev_len.saturating_add(added)) };
         }
     }
@@ -879,6 +878,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         insert.push_slice(&head[range]);
         let added = insert.complete();
         if added > 0 {
+            // SAFETY: the capacity of the buffer is guaranteed to be >= prev_len + added
             unsafe { self.buffer.set_length(prev_len.saturating_add(added)) };
         }
         Ok(())
@@ -895,7 +895,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
         let added = insert.complete();
         if added > 0 {
-            unsafe { self.buffer.set_length(prev_len.saturating_add(added)) };
+            self.buffer.set_length(prev_len.saturating_add(added));
         }
     }
 
@@ -907,6 +907,7 @@ impl<T, C: VecConfig> Vec<T, C> {
             let ins_count = insert.complete();
             let new_len = prev_len.saturating_add(ins_count);
             if ins_count > 0 {
+                // SAFETY: the buffer capacity is established as >= new_len
                 unsafe { self.buffer.set_length(new_len) };
             }
             if new_len < self.buffer.capacity() {
@@ -971,14 +972,17 @@ impl<T, C: VecConfig> Vec<T, C> {
             Ok(_) => (),
             Err(error) => return Err(UpdateError::new(error, value)),
         };
-        unsafe {
-            let head = self.buffer.data_ptr_mut().add(index);
-            if tail_count > 0 {
-                ptr::copy(head, head.add(1), tail_count);
-            }
-            head.write(value);
+        // SAFETY: `index` is within the capacity of the buffer
+        let head = unsafe { self.buffer.data_ptr_mut().add(index) };
+        if tail_count > 0 {
+            // Shift tail entries over by one.
+            // SAFETY: the buffer has been established to contain at least
+            // one additional entry by `_try_reserve`.
+            unsafe { ptr::copy(head, head.add(1), tail_count) };
         }
-        // SAFETY: capacity of the buffer has been established as > 0 by try_reserve
+        // SAFETY: head is established as a valid pointer
+        unsafe { head.write(value) };
+        // SAFETY: capacity of the buffer has been established as > 0 by `_try_reserve`
         unsafe { self.buffer.set_length(prev_len.saturating_add(1)) };
         Ok(())
     }
@@ -1016,16 +1020,15 @@ impl<T, C: VecConfig> Vec<T, C> {
         }
         self._try_reserve(ins_count, false)?;
         let tail_count = prev_len - index;
+        // SAFETY: `index` is within the capacity of the buffer
         let head = unsafe { self.buffer.data_ptr_mut().add(index) };
         if tail_count > 0 {
             // Temporarily disavow all entries after `index` as they may be uninitialized.
-            // SAFETY: the capacity of the buffer has been established as > 0 by `try_reserve`.
-            unsafe {
-                self.buffer.set_length(C::Index::from_usize(index));
-            }
+            // SAFETY: the capacity of the buffer has been established as > 0 by `_try_reserve`.
+            unsafe { self.buffer.set_length(C::Index::from_usize(index)) };
             // Shift tail entries by the number of items to be inserted.
             // SAFETY: the buffer has been established to contain at least `ins_count`
-            // additional capacity by `try_reserve`.
+            // additional capacity by `_try_reserve`.
             unsafe { ptr::copy(head, head.add(index + ins_count), tail_count) };
         }
         let mut insert = Inserter::new_with_tail(
@@ -1034,7 +1037,7 @@ impl<T, C: VecConfig> Vec<T, C> {
         );
         insert.push_slice(other);
         insert.complete();
-        // SAFETY: capacity of the buffer has been established as > 0 by `try_reserve`.
+        // SAFETY: capacity of the buffer has been established as > 0 by `_try_reserve`.
         unsafe {
             self.buffer
                 .set_length(C::Index::from_usize(prev_len + ins_count));
@@ -1062,9 +1065,8 @@ impl<T, C: VecConfig> Vec<T, C> {
             Ok(_) => (),
             Err(error) => error.panic(),
         }
-        unsafe {
-            self.push_unchecked(item);
-        }
+        // SAFETY: the buffer capacity has been established by `_try_reserve`
+        unsafe { self.push_unchecked(item) };
     }
 
     /// Appends an element if there is sufficient spare capacity, otherwise an error is
@@ -1075,9 +1077,8 @@ impl<T, C: VecConfig> Vec<T, C> {
     /// capacity.    
     pub fn push_within_capacity(&mut self, item: T) -> Result<(), T> {
         if self.len() < self.capacity() {
-            unsafe {
-                self.push_unchecked(item);
-            }
+            // SAFETY: the buffer capacity has been checked
+            unsafe { self.push_unchecked(item) };
             Ok(())
         } else {
             Err(item)
@@ -1092,9 +1093,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         if let Err(error) = self._try_reserve(1, false) {
             return Err(UpdateError::new(error, item));
         }
-        unsafe {
-            self.push_unchecked(item);
-        }
+        // SAFETY: the capacity has been established by `_try_reserve`
+        unsafe { self.push_unchecked(item) };
         Ok(())
     }
 
@@ -1388,7 +1388,8 @@ impl<T, C: VecConfig> Vec<T, C> {
         let length = self.len().into();
         let (data, spare) = self.buffer.as_uninit_slice().split_at_mut(length);
         (
-            unsafe { slice::from_raw_parts_mut(data.as_mut_ptr().cast(), length) },
+            // SAFETY: items in the range 0..length are guaranteed to be initialized
+            unsafe { slice::from_raw_parts_mut(data.as_mut_ptr().cast::<T>(), length) },
             spare,
         )
     }
@@ -1422,6 +1423,7 @@ impl<T, C: VecConfig> Vec<T, C> {
                 if index_usize == 0 {
                     mem::swap(&mut buffer, &mut self.buffer);
                 } else {
+                    // SAFETY: independent buffers cannot be overlapping
                     unsafe {
                         ptr::copy_nonoverlapping(
                             self.buffer.data_ptr().add(index_usize),
@@ -1480,14 +1482,13 @@ impl<T, C: VecConfig> Vec<T, C> {
             index_panic();
         }
         let last: usize = length - 1;
+        if index != last {
+            self.buffer.as_uninit_slice().swap(index, last);
+        }
         // SAFETY: buffer capacity is established as > 0
         unsafe { self.buffer.set_length(C::Index::from_usize(last)) };
-        let data = self.buffer.as_uninit_slice();
-        let result = unsafe { data[index].assume_init_read() };
-        if index != last {
-            unsafe { data[index].write(data[last].assume_init_read()) };
-        }
-        result
+        // SAFETY: index 'last' is within the buffer capacity
+        unsafe { self.buffer.uninit_index(last).assume_init_read() }
     }
 
     /// Reduce the length of this vector to at most `length`, dropping any items
@@ -1501,9 +1502,7 @@ impl<T, C: VecConfig> Vec<T, C> {
             unsafe { self.buffer.set_length(C::Index::from_usize(new_len)) };
             let drop_start = unsafe { self.buffer.data_ptr_mut().add(new_len) };
             let to_drop = ptr::slice_from_raw_parts_mut(drop_start, remove);
-            unsafe {
-                ptr::drop_in_place(to_drop);
-            }
+            unsafe { ptr::drop_in_place(to_drop) };
         }
     }
 }
@@ -1576,14 +1575,14 @@ impl<T, C: VecConfig> Deref for Vec<T, C> {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        unsafe { slice::from_raw_parts(self.buffer.data_ptr(), self.len().into()) }
+        self.buffer.as_slice()
     }
 }
 
 impl<T, C: VecConfig> DerefMut for Vec<T, C> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { slice::from_raw_parts_mut(self.buffer.data_ptr_mut(), self.len().into()) }
+        self.buffer.as_mut_slice()
     }
 }
 
@@ -1591,9 +1590,7 @@ impl<T, C: VecConfig> Drop for Vec<T, C> {
     fn drop(&mut self) {
         let to_drop: &mut [T] = self.as_mut_slice();
         if !to_drop.is_empty() {
-            unsafe {
-                ptr::drop_in_place(to_drop);
-            }
+            unsafe { ptr::drop_in_place(to_drop) };
             // SAFETY: buffer capacity is established as > 0
             unsafe { self.buffer.set_length(C::Index::ZERO) };
         }

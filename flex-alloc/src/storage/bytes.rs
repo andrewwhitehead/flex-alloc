@@ -36,8 +36,7 @@ impl<'a, T, const N: usize> AllocateIn for &'a mut ByteStorage<T, N> {
 
 impl<T, const N: usize> ConstDefault for ByteStorage<T, N> {
     const DEFAULT: Self = Self {
-        // SAFETY: this is the accepted method to construct a `MaybeUninit` slice.
-        data: unsafe { MaybeUninit::uninit().assume_init() },
+        data: [const { MaybeUninit::uninit() }; N],
     };
 }
 

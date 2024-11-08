@@ -26,7 +26,8 @@ impl<'a, T> Inserter<'a, T> {
     #[inline]
     pub fn push(&mut self, val: T) {
         assert!(self.pos < self.cap);
-        unsafe { self.push_unchecked(val) };
+        self.buf[self.pos].write(val);
+        self.pos += 1;
     }
 
     #[inline]

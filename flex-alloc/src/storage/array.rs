@@ -24,7 +24,7 @@ impl<T, const N: usize> fmt::Debug for ArrayStorage<T, N> {
 }
 
 impl<T, const N: usize> ConstDefault for ArrayStorage<T, N> {
-    const DEFAULT: Self = Self(unsafe { MaybeUninit::uninit().assume_init() });
+    const DEFAULT: Self = Self([const { MaybeUninit::uninit() }; N]);
 }
 
 impl<T, const N: usize> Default for ArrayStorage<T, N> {
