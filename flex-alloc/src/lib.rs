@@ -21,7 +21,7 @@
 #![cfg_attr(feature = "nightly", feature(allocator_api, coerce_unsized, unsize))]
 #![warn(missing_docs)]
 
-#[doc = include_str!("../../README.md")]
+#[doc = include_str!("../README.md")]
 #[cfg(doctest)]
 struct _ReadmeDoctests;
 
