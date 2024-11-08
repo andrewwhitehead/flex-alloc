@@ -1,5 +1,5 @@
 use core::alloc::Layout;
-use core::mem::{ManuallyDrop, MaybeUninit};
+use core::mem::{size_of, ManuallyDrop, MaybeUninit};
 use core::ptr;
 use core::ptr::NonNull;
 
