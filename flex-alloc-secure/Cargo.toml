@@ -1,6 +1,6 @@
 [package]
 name = "flex-alloc-secure"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Andrew Whitehead <cywolf@gmail.com>"]
 edition = "2021"
 description = "Secured allocations for flex-alloc"
@@ -23,7 +23,7 @@ windows-sys = { version = "0.59", features = [
 [dependencies]
 chacha20poly1305 = { version = "0.10", features = ["reduced-round"] }
 const-default = "1"
-flex-alloc = { version = "0.0.4", path = "../flex-alloc", features = [
+flex-alloc = { version = "0.0.5", path = "../flex-alloc", features = [
     "alloc",
     "zeroize",
 ] }
