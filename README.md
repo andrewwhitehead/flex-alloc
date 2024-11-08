@@ -8,8 +8,8 @@ The `flex-alloc-secure` crate adds data types for working with security-sensitiv
 
 See the API documentation:
 
-- (`flex-alloc`)[https://docs.rs/flex-alloc]
-- (`flex-alloc-secure`)[https://docs.rs/flex-alloc-secure]
+- [`flex-alloc`](https://docs.rs/flex-alloc)
+- [`flex-alloc-secure`](https://docs.rs/flex-alloc-secure)
 
 ## `flex-alloc` highlights
 
