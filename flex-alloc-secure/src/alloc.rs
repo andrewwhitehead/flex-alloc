@@ -326,8 +326,8 @@ unsafe impl Allocator for SecureAlloc {
             // FIXME: use Layout::dangling when stabilized
             // SAFETY: layout alignments are guaranteed to be non-zero.
             #[allow(clippy::useless_transmute)]
-            let head = unsafe { NonNull::new_unchecked(transmute(layout.align())) };
-            Ok(NonNull::slice_from_raw_parts(head, 0))
+            let dangling = unsafe { NonNull::new_unchecked(transmute(layout.align())) };
+            Ok(NonNull::slice_from_raw_parts(dangling, 0))
         } else {
             let alloc = alloc_pages(layout_len).map_err(|_| AllocError)?;
             let alloc_len = alloc.len();
