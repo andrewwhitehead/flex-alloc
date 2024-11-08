@@ -7,22 +7,23 @@ use rstest::rstest;
 
 #[cfg(feature = "alloc")]
 use const_default::ConstDefault;
-#[cfg(feature = "alloc")]
 use flex_alloc::{
-    alloc::{Fixed, Global, SpillAlloc},
-    boxed::Box as FlexBox,
-    vec,
-    vec::{
-        config::{Custom, Thin},
-        ThinVec,
-    },
-};
-use flex_alloc::{
+    alloc::Fixed,
     capacity::Index,
     storage::{aligned_byte_storage, array_storage, byte_storage, Inline},
     vec::{
         config::{VecConfig, VecConfigNew, VecNewIn},
         InlineVec, Vec as FlexVec,
+    },
+};
+#[cfg(feature = "alloc")]
+use flex_alloc::{
+    alloc::{Global, SpillAlloc},
+    boxed::Box as FlexBox,
+    vec,
+    vec::{
+        config::{Custom, Thin},
+        ThinVec,
     },
 };
 
