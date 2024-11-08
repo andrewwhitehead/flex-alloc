@@ -95,7 +95,7 @@ pub type FixedBox<'a, T> = Box<T, Fixed<'a>>;
 pub type SpillBox<'a, T, A = Global> = Box<T, Spill<'a, A>>;
 
 #[cfg(feature = "zeroize")]
-/// A vector which automatically zeroizes its buffer when dropped.
+/// A box which automatically zeroizes its buffer when dropped.
 pub type ZeroizingBox<T> = Box<T, crate::alloc::ZeroizingAlloc<Global>>;
 
 /// A pointer type that uniquely owns an allocation of type `T`.
