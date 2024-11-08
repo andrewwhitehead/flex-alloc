@@ -82,7 +82,7 @@ pub trait ProtectedInit: ExposeProtected + From<SecureBox<Self::Target>> + Sized
     fn init_take<F>(from: &mut Self::Target, f: F) -> Self
     where
         F: FnOnce(SecureRef<&mut Self::Target>),
-        Self::Target: Copy + Zeroize,
+        Self::Target: DefaultIsZeroes,
     {
         let boxed = SecureBox::new_uninit();
         let mut boxed = SecureBox::write(boxed, *from);
@@ -128,7 +128,7 @@ pub trait ProtectedInit: ExposeProtected + From<SecureBox<Self::Target>> + Sized
     /// existing value.
     fn take(from: &mut Self::Target) -> Self
     where
-        Self::Target: Copy + Zeroize,
+        Self::Target: DefaultIsZeroes,
     {
         Self::init_take(from, |_| ())
     }

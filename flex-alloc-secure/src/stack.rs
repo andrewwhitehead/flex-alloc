@@ -8,7 +8,7 @@ use core::slice;
 
 use const_default::ConstDefault;
 use rand_core::RngCore;
-use zeroize::Zeroize;
+use zeroize::{DefaultIsZeroes, Zeroize};
 
 use crate::{
     alloc::{lock_pages, unlock_pages, UNINIT_ALLOC_BYTE},
@@ -52,7 +52,7 @@ impl<T: Copy> Secured<T> {
     pub fn borrow_take<F, R>(&mut self, take: &mut T, f: F) -> R
     where
         F: FnOnce(SecureRef<&mut T>) -> R,
-        T: Zeroize,
+        T: DefaultIsZeroes,
     {
         let lock = SecuredGuard::new(&mut self.0);
         lock.0.write(*take);
@@ -99,7 +99,7 @@ impl<T: Copy> Secured<T> {
     pub fn take<F, R>(take: &mut T, f: F) -> R
     where
         F: FnOnce(SecureRef<&mut T>) -> R,
-        T: Zeroize,
+        T: DefaultIsZeroes,
     {
         let mut slf = Secured::DEFAULT;
         slf.borrow_take(take, f)
@@ -203,76 +203,6 @@ impl<T> Drop for SecuredGuard<'_, T> {
         };
     }
 }
-
-// implemented to support FillBytes
-impl<T> Zeroize for SecuredGuard<'_, T> {
-    fn zeroize(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-// /// Temporary mutable access to a `Secured` value.
-// pub struct SecuredMut<'m, T: ?Sized>(&'m mut T);
-
-// impl<'a, T: ?Sized> SecuredMut<'a, T> {
-//     #[inline]
-//     fn new(inner: &'a mut T) -> Self {
-//         Self(inner)
-//     }
-// }
-
-// impl<'a, T> SecuredMut<'a, MaybeUninit<T>> {
-//     /// Convert this reference into an initialized state.
-//     /// # Safety
-//     /// If the inner value is not properly initialized, then
-//     /// undetermined behavior may result.
-//     #[inline]
-//     pub unsafe fn assume_init(self) -> SecuredMut<'a, T> {
-//         SecuredMut(self.0.assume_init_mut())
-//     }
-
-//     /// Write a value to the uninitialized reference and
-//     /// safely initialize it.
-//     #[inline(always)]
-//     pub fn write(self, value: T) -> SecuredMut<'a, T> {
-//         self.0.write(value);
-//         SecuredMut(unsafe { self.0.assume_init_mut() })
-//     }
-// }
-
-// impl<T: ?Sized> AsRef<T> for SecuredMut<'_, T> {
-//     #[inline]
-//     fn as_ref(&self) -> &T {
-//         self.0
-//     }
-// }
-
-// impl<T: ?Sized> AsMut<T> for SecuredMut<'_, T> {
-//     #[inline]
-//     fn as_mut(&mut self) -> &mut T {
-//         self.0
-//     }
-// }
-
-// impl<T: ?Sized> Deref for SecuredMut<'_, T> {
-//     type Target = T;
-
-//     fn deref(&self) -> &Self::Target {
-//         self.0
-//     }
-// }
-
-// impl<T: ?Sized> DerefMut for SecuredMut<'_, T> {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         self.0
-//     }
-// }
-
-// impl<T: ?Sized> fmt::Debug for SecuredMut<'_, T> {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         f.write_fmt(format_args!("SecuredMut<{}>", type_name::<T>()))
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
