@@ -6,6 +6,9 @@ use core::ptr::{self, NonNull};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::{fmt, slice};
 
+#[cfg(all(windows, not(miri)))]
+use core::mem::MaybeUninit;
+
 use flex_alloc::alloc::{AllocError, Allocator, AllocatorDefault, AllocatorZeroizes};
 use flex_alloc::StorageError;
 use zeroize::Zeroize;
@@ -84,7 +87,7 @@ pub fn default_page_size() -> usize {
         }
         #[cfg(all(windows, not(miri)))]
         {
-            let mut sysinfo = mem::MaybeUninit::<SystemInformation::SYSTEM_INFO>::uninit();
+            let mut sysinfo = MaybeUninit::<SystemInformation::SYSTEM_INFO>::uninit();
             unsafe { SystemInformation::GetSystemInfo(sysinfo.as_mut_ptr()) };
             size = unsafe { sysinfo.assume_init_ref() }.dwPageSize as usize;
         }
@@ -255,7 +258,7 @@ pub fn set_page_protection(
     }
     #[cfg(all(windows, not(miri)))]
     {
-        let mut prev_mode = mem::MaybeUninit::<u32>::uninit();
+        let mut prev_mode = MaybeUninit::<u32>::uninit();
         let res = unsafe {
             Memory::VirtualProtect(addr.cast(), len, mode.as_native(), prev_mode.as_mut_ptr())
         };
