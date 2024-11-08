@@ -1,6 +1,15 @@
 # flex-alloc
 
-This repository contains two related Rust crates, see the API documentation here: - (`flex-alloc`)[https://docs.rs/flex-alloc] - (`flex-alloc-secure`)[https://docs.rs/flex-alloc-secure]
+`flex-alloc` provides highly flexible container types (currently `Box`, `Cow`, and `Vec`) which mimic the API provided in `std`, with allocation flexibility going beyond what is supported by unstable features such as `allocator-api`.
+
+Both `no-std` and `no-alloc` environments are supported.
+
+The `flex-alloc-secure` crate adds data types for working with security-sensitive data such as cryptographic keys.
+
+See the API documentation:
+
+- (`flex-alloc`)[https://docs.rs/flex-alloc]
+- (`flex-alloc-secure`)[https://docs.rs/flex-alloc-secure]
 
 ## `flex-alloc` highlights
 
